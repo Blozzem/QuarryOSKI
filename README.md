@@ -16,6 +16,8 @@ computers, advanced computers, turtles and pocket computers.
 - Safe delegation of all other commands to the native ComputerCraft shell
 - A `status` command that reports the current computer, label and fuel level
 - Non-destructive installer which backs up an existing `startup` program
+- Turtle quarry program that mines a vertical shaft to bedrock, auto-refuels
+  from the turtle inventory and returns to its starting height
 
 ## Requirements
 
@@ -38,13 +40,29 @@ startup program already exists, it is copied to `/startup.quarryos-backup`.
 
 After installation, reboot the computer or execute `startup`.
 
+## Turtle quarry
+
+Place an output chest containing fuel (for example coal) directly above the
+turtle's starting position, then run:
+
+```lua
+/quarryos/quarry.lua
+```
+
+It digs a one-block vertical shaft until it reaches an unbreakable block
+(normally bedrock). When its inventory is full or its fuel reserve is too low,
+it returns to the surface, unloads into the chest, takes fuel from it, refuels
+and travels back to its previous depth before continuing. It returns to the
+starting height when complete. Use `/quarryos/quarry.lua <depth>` to set a
+maximum depth.
+
 ## Development layout
 
 ```
-install.lua             One-line remote installer
-src/startup.lua         Boot entry point copied to the computer root
-src/quarryos/kernel.lua Interactive QuarryOS shell
-src/quarryos/lib/ui.lua Terminal rendering helpers
+install.lua  One-line remote installer
+startup.lua  Boot entry point copied to the computer root
+kernel.lua   Interactive QuarryOS shell
+ui.lua       Terminal rendering helpers
 ```
 
 ## License

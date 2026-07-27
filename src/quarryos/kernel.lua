@@ -1,4 +1,4 @@
-local ui = dofile("/quarryos/lib/ui.lua")
+local ui = dofile("/quarryos/ui.lua")
 
 local VERSION = "0.1.0"
 local running = true
