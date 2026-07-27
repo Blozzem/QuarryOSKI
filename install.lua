@@ -9,6 +9,7 @@ local files = {
   ["kernel.lua"] = root .. "/kernel.lua",
   ["ui.lua"] = root .. "/ui.lua",
   ["src/quarry.lua"] = root .. "/quarry.lua",
+  ["src/update.lua"] = root .. "/update.lua",
 }
 
 if not http.checkURL("https://raw.githubusercontent.com") then

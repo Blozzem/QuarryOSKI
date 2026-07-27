@@ -12,22 +12,6 @@ local function fuelLevel()
   return value == "unlimited" and math.huge or value
 end
 
-local function refuel(target)
-  while fuelLevel() < target do
-    local usedFuel = false
-    for slot = 1, 16 do
-      turtle.select(slot)
-      if turtle.refuel(0) then
-        turtle.refuel(1)
-        usedFuel = true
-        break
-      end
-    end
-    if not usedFuel then return false end
-  end
-  return true
-end
-
 local function inventoryFull()
   for slot = 1, 16 do
     if turtle.getItemCount(slot) == 0 then return false end
@@ -53,18 +37,33 @@ end
 
 local function serviceAtSurface(depth)
   returnToSurface(depth)
-  print("Unloading to chest above the turtle...")
+  print("Unloading everything to the chest above the turtle...")
   for slot = 1, 16 do
     turtle.select(slot)
-    turtle.dropUp()
-  end
-
-  -- The chest should contain only fuel. Pull one stack at a time as needed.
-  while not refuel((depth + 20) * 2) do
-    if not turtle.suckUp() then
-      printError("No fuel in the chest above. Add fuel and run the program again.")
+    if turtle.getItemCount(slot) > 0 and not turtle.dropUp() then
+      printError("The service chest is full. Empty it and run the program again.")
       return false
     end
+  end
+
+  -- The same chest may contain both loot and fuel. Non-fuel items are put
+  -- back immediately; this walks through the chest until usable fuel is found.
+  local targetFuel = (depth + 20) * 2
+  local attempts = 0
+  while fuelLevel() < targetFuel and attempts < 128 do
+    turtle.select(16)
+    if not turtle.suckUp(1) then break end
+    if turtle.refuel(0) then
+      turtle.refuel(1)
+    elseif not turtle.dropUp() then
+      printError("The service chest is full. Empty it and run the program again.")
+      return false
+    end
+    attempts = attempts + 1
+  end
+  if fuelLevel() < targetFuel then
+    printError("No usable fuel in the service chest. Add coal or another fuel.")
+    return false
   end
 
   print("Refuelled. Returning to depth " .. depth .. "...")
@@ -74,7 +73,7 @@ end
 
 local depth = 0
 print("QuarryOS vertical quarry started.")
-print("Place an output chest with fuel above the starting position.")
+print("Place one service chest with fuel above the starting position.")
 
 while not requestedDepth or depth < requestedDepth do
   -- Reserve enough fuel to return to the surface, plus a small digging margin.

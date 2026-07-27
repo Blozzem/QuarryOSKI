@@ -42,7 +42,7 @@ After installation, reboot the computer or execute `startup`.
 
 ## Turtle quarry
 
-Place an output chest containing fuel (for example coal) directly above the
+Place one service chest containing fuel (for example coal) directly above the
 turtle's starting position, then run:
 
 ```lua
@@ -51,10 +51,16 @@ turtle's starting position, then run:
 
 It digs a one-block vertical shaft until it reaches an unbreakable block
 (normally bedrock). When its inventory is full or its fuel reserve is too low,
-it returns to the surface, unloads into the chest, takes fuel from it, refuels
+it returns to the surface, puts every collected item into the chest, takes fuel
+from the same chest, refuels
 and travels back to its previous depth before continuing. It returns to the
 starting height when complete. Use `/quarryos/quarry.lua <depth>` to set a
 maximum depth.
+
+## In-game updates
+
+Run `update` from the QuarryOS shell to download the current version in place.
+No computer files need to be deleted; only QuarryOS files are replaced.
 
 ## Development layout
 

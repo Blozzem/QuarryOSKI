@@ -21,6 +21,7 @@ local function printHelp()
   print("  ls [directory]       List files")
   print("  edit <file>          Open the native editor")
   print("  run <program> [...]  Run a program")
+  print("  update               Download the latest QuarryOS version")
   print("  reboot | shutdown    Power controls")
   print("\nOther commands are passed to the normal ComputerCraft shell.")
 end
@@ -98,6 +99,10 @@ builtins.run = function(arguments)
   end
   table.remove(arguments, 1)
   shell.run(table.unpack(arguments))
+end
+
+builtins.update = function()
+  shell.run("/quarryos/update.lua")
 end
 
 builtins.reboot = function() os.reboot() end
