@@ -62,6 +62,10 @@ starting corner, sorts its items into the output chests, refuels and continues
 with the next column. Progress survives restarts. Use `stats` to view statistics
 for the last completed quarry.
 
+Quarry plans include Small (8x8), Medium (16x16), Large (32x32) and a custom
+size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
+previous jobs and `selftest` to check the complete setup.
+
 If Minecraft or the server restarts, run `/quarryos/quarry.lua` again on the
 same turtle. QuarryOS restores its saved depth and continues the current shaft.
 

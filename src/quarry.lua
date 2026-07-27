@@ -56,6 +56,11 @@ local function broadcastMonitor(message)
   pcall(rednet.broadcast, textutils.serialize(payload), "quarryos-monitor")
 end
 
+local function notify(message)
+  pcall(rednet.broadcast, message, "quarryos-notify")
+  broadcastMonitor("NOTICE: " .. message)
+end
+
 local function dashboard(message)
   local width = term.getSize()
   term.setBackgroundColor(colors.black)
@@ -198,15 +203,38 @@ local function setupMenu()
     return nil
   end
   print("")
-  local width = menuNumber("Width (blocks)", 1, false)
-  local length = menuNumber("Length (blocks)", 1, false)
-  local maximum = menuNumber("Depth (0 = bedrock)", 1, true)
+  print("Select quarry plan:")
+  print("  1) Small  8 x 8  to bedrock")
+  print("  2) Medium 16 x 16 to bedrock")
+  print("  3) Large  32 x 32 to bedrock")
+  print("  4) Custom size")
+  local choice = menuNumber("Plan", 1, false)
+  local width, length, maximum
+  if choice == 1 then width, length, maximum = 8, 8, 0
+  elseif choice == 2 then width, length, maximum = 16, 16, 0
+  elseif choice == 3 then width, length, maximum = 32, 32, 0
+  elseif choice == 4 then
+    width = menuNumber("Width (blocks)", 1, false)
+    length = menuNumber("Length (blocks)", 1, false)
+    maximum = menuNumber("Depth (0 = bedrock)", 1, true)
+  else
+    printError("Unknown plan.")
+    return nil
+  end
+  local estimateDepth = maximum == 0 and 320 or maximum
+  local estimatedBlocks = width * length * estimateDepth
+  local estimatedFuel = estimatedBlocks * 2 + width * length * 8 + 200
+  print("Estimated blocks: " .. estimatedBlocks)
+  print("Estimated fuel:  " .. estimatedFuel)
+  write("Start this quarry? [Y/n] ")
+  if read():lower() == "n" then return nil end
   return {
     width = width, length = length, maximum = maximum,
     targetX = 0, targetZ = 0, x = 0, z = 0, heading = 0,
     current = 0, mined = 0, phase = "ready",
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
+    started = os.epoch("utc"), plan = choice,
   }
 end
 
@@ -214,6 +242,7 @@ if not state then
   state = setupMenu()
   if not state then return end
   saveState()
+  notify("Quarry started: " .. state.width .. "x" .. state.length)
 elseif not preflightCheck(true) then
   paint(colors.white)
   print("Fix the service chests before resuming this quarry.")
@@ -412,7 +441,14 @@ term.setCursorPos(1, 1)
 paint(colors.lime)
 print("Quarry complete. All columns were delivered to the service chest.")
 paint(colors.white)
+notify("Quarry complete: " .. state.stats.blocks .. " blocks mined")
 local statsHandle = fs.open("/quarryos/quarry-last-stats", "w")
 statsHandle.write(textutils.serialize(state.stats))
 statsHandle.close()
+local history = fs.open("/quarryos/quarry-history", "a")
+history.writeLine(textutils.serialize({
+  width = state.width, length = state.length, maximum = state.maximum,
+  blocks = state.stats.blocks, started = state.started, finished = os.epoch("utc"),
+}))
+history.close()
 fs.delete(stateFile)

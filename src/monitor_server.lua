@@ -43,7 +43,11 @@ end
 
 print("QuarryOS monitor server ready.")
 while true do
-  local _, message = rednet.receive("quarryos-monitor")
-  local data = textutils.unserialize(message)
-  if data then draw(data) end
+  local _, message, protocol = rednet.receive()
+  if protocol == "quarryos-monitor" then
+    local data = textutils.unserialize(message)
+    if data then draw(data) end
+  elseif protocol == "quarryos-notify" then
+    print("Quarry notification: " .. message)
+  end
 end
