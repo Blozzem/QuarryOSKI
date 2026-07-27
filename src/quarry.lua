@@ -102,28 +102,63 @@ local function menuNumber(label, minimum, allowZero)
   end
 end
 
-local function setupMenu()
-  term.setBackgroundColor(colors.black)
-  term.clear()
-  term.setCursorPos(1, 1)
-  term.setBackgroundColor(colors.blue)
-  paint(colors.white)
-  print(" QuarryOS | NEW QUARRY SETUP ")
-  term.setBackgroundColor(colors.black)
-  term.setCursorPos(2, 3)
-  paint(colors.lightGray)
-  print("Service chest check: ")
-  if not peripheral.isPresent("top") or not peripheral.isPresent("left") or not peripheral.isPresent("right") then
-    paint(colors.red)
-    print("Missing chest: top, left and right are required.")
+local function isInventory(side)
+  if not peripheral.isPresent(side) then return false end
+  if peripheral.hasType then return peripheral.hasType(side, "inventory") end
+  return peripheral.wrap(side) ~= nil
+end
+
+local function preflightCheck(showHeader)
+  if showHeader then
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    term.setCursorPos(1, 1)
+    term.setBackgroundColor(colors.blue)
     paint(colors.white)
-    print("Top=fuel, left=ores, right=blocks. Run again.")
+    print(" QuarryOS | SERVICE CHEST CHECK ")
+    term.setBackgroundColor(colors.black)
+  end
+
+  local checks = {
+    { side = "top", label = "Fuel chest (top)" },
+    { side = "left", label = "Ore chest (left)" },
+    { side = "right", label = "Block chest (right)" },
+  }
+  local ok = true
+  for index, check in ipairs(checks) do
+    term.setCursorPos(2, index + 2)
+    paint(colors.lightGray)
+    write(check.label .. ": ")
+    if isInventory(check.side) then
+      paint(colors.lime)
+      print("OK")
+    else
+      paint(colors.red)
+      print("MISSING OR NOT AN INVENTORY")
+      ok = false
+    end
+  end
+
+  if ok then
+    local fuelChest = peripheral.wrap("top")
+    local contents = fuelChest and fuelChest.list and fuelChest.list() or {}
+    if next(contents) == nil then
+      term.setCursorPos(2, 7)
+      paint(colors.red)
+      print("Fuel chest is empty. Add fuel before starting.")
+      ok = false
+    end
+  end
+  paint(colors.white)
+  return ok
+end
+
+local function setupMenu()
+  if not preflightCheck(true) then
+    paint(colors.white)
+    print("Fix the service chests, then run QuarryOS again.")
     return nil
   end
-  paint(colors.lime)
-  print("Service chests detected.")
-  paint(colors.lightGray)
-  print("Top=fuel, left=ores, right=blocks.")
   print("")
   local width = menuNumber("Width (blocks)", 1, false)
   local length = menuNumber("Length (blocks)", 1, false)
@@ -140,6 +175,10 @@ if not state then
   state = setupMenu()
   if not state then return end
   saveState()
+elseif not preflightCheck(true) then
+  paint(colors.white)
+  print("Fix the service chests before resuming this quarry.")
+  return
 end
 
 -- Heading: 0=east, 1=south, 2=west, 3=north. Coordinates are saved after
