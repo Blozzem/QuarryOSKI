@@ -67,6 +67,11 @@ same turtle. QuarryOS restores its saved depth and continues the current shaft.
 Run `update` from the QuarryOS shell to download the current version in place.
 No computer files need to be deleted; only QuarryOS files are replaced.
 
+## Guides
+
+- [GPS network setup](docs/GPS.md)
+- [Live monitor setup](docs/MONITOR.md)
+
 ## Development layout
 
 ```

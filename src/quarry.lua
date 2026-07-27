@@ -46,6 +46,16 @@ end
 
 local function paint(colour) term.setTextColor(colour) end
 
+local function broadcastMonitor(message)
+  local payload = {
+    width = state.width, length = state.length, maximum = state.maximum,
+    columnX = state.targetX, columnZ = state.targetZ,
+    current = state.current, mined = state.mined,
+    fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
+  }
+  pcall(rednet.broadcast, textutils.serialize(payload), "quarryos-monitor")
+end
+
 local function dashboard(message)
   local width = term.getSize()
   term.setBackgroundColor(colors.black)
@@ -91,6 +101,7 @@ local function dashboard(message)
   paint(colors.yellow)
   print(message or "Working...")
   paint(colors.white)
+  broadcastMonitor(message)
 end
 
 local function menuNumber(label, minimum, allowZero)
