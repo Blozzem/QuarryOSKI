@@ -1,0 +1,6 @@
+# ComputerCraft runtime files
+startup.quarryos-backup
+
+# IDE files
+.idea/
+.vscode/
