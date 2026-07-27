@@ -44,19 +44,17 @@ After installation, reboot the computer or execute `startup`.
 ## Turtle quarry
 
 Place one service chest containing fuel (for example coal) directly above the
-turtle's starting position, then run:
+turtle's starting corner, then run the quarry program. A setup menu checks for
+the chest and asks for freely selectable width, length and depth (`0` means
+mine until bedrock):
 
 ```lua
 /quarryos/quarry.lua
 ```
 
-It digs a one-block vertical shaft until it reaches an unbreakable block
-(normally bedrock). When its inventory is full or its fuel reserve is too low,
-it returns to the surface, puts every collected item into the chest, takes fuel
-from the same chest, refuels
-and travels back to its previous depth before continuing. It returns to the
-starting height when complete. Use `/quarryos/quarry.lua <depth>` to set a
-maximum depth.
+It mines every column in the selected area. After each column it returns to the
+starting corner, puts every collected item into the chest, takes fuel from the
+same chest and continues with the next column. Progress survives restarts.
 
 If Minecraft or the server restarts, run `/quarryos/quarry.lua` again on the
 same turtle. QuarryOS restores its saved depth and continues the current shaft.

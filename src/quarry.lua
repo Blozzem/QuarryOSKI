@@ -1,30 +1,39 @@
--- QuarryOS Advanced Turtle quarry. A service chest with fuel belongs directly
--- above the starting position. Progress is stored after every vertical move.
-local requestedDepth = tonumber(({ ... })[1])
+-- QuarryOS Advanced Turtle quarry. The service chest belongs directly above
+-- the turtle's starting corner. Width, length and depth are chosen in-game.
 local stateFile = "/quarryos/quarry-state"
 
-if not turtle then
-  printError("This program must run on a turtle.")
-  return
-end
-
-if not term.isColor() then
-  printError("QuarryOS requires an Advanced Turtle with a colour display.")
-  return
-end
+if not turtle then printError("This program must run on an Advanced Turtle.") return end
+if not term.isColor() then printError("QuarryOS requires an Advanced Turtle.") return end
 
 local function loadState()
-  if not fs.exists(stateFile) then return { current = 0, mined = 0 } end
+  if not fs.exists(stateFile) then return nil end
   local handle = fs.open(stateFile, "r")
-  local state = textutils.unserialize(handle.readAll())
+  local value = textutils.unserialize(handle.readAll())
   handle.close()
-  return state or { current = 0, mined = 0 }
+  return value
 end
 
 local state = loadState()
-requestedDepth = requestedDepth or state.maximum
 
-local fuelLevel
+-- Preserve an unfinished shaft from older QuarryOS releases instead of trying
+-- to interpret it as an area-quarry plan.
+if state and not state.width then
+  fs.move(stateFile, stateFile .. ".legacy")
+  state = nil
+  print("Old quarry state backed up to /quarryos/quarry-state.legacy")
+end
+
+local function saveState()
+  local handle = fs.open(stateFile, "w")
+  handle.write(textutils.serialize(state))
+  handle.close()
+end
+
+local function fuelLevel()
+  local fuel = turtle.getFuelLevel()
+  return fuel == "unlimited" and math.huge or fuel
+end
+
 local function paint(colour) term.setTextColor(colour) end
 
 local function dashboard(message)
@@ -34,166 +43,245 @@ local function dashboard(message)
   term.setCursorPos(1, 1)
   term.setBackgroundColor(colors.blue)
   paint(colors.white)
-  write(" QuarryOS  |  ADVANCED TURTLE")
-  write(string.rep(" ", math.max(0, width - 30)))
+  write(" QuarryOS | ADVANCED QUARRY")
+  write(string.rep(" ", math.max(0, width - 28)))
   term.setBackgroundColor(colors.black)
-
   term.setCursorPos(2, 3)
   paint(colors.cyan)
-  write("VERTICAL QUARRY")
+  write("AREA  " .. state.width .. " x " .. state.length .. "  |  ")
+  write(state.maximum == 0 and "BEDROCK" or ("DEPTH " .. state.maximum))
   term.setCursorPos(2, 5)
   paint(colors.lightGray)
-  write("Current depth: ")
+  write("Column: ")
   paint(colors.white)
-  write(tostring(state.current))
+  write((state.targetX + 1) .. "/" .. state.width .. "  " .. (state.targetZ + 1) .. "/" .. state.length)
   term.setCursorPos(2, 6)
   paint(colors.lightGray)
-  write("Mining depth:  ")
+  write("Depth: ")
   paint(colors.white)
-  write(tostring(state.mined))
-  term.setCursorPos(2, 7)
-  paint(colors.lightGray)
-  write("Target depth:  ")
-  paint(colors.white)
-  write(requestedDepth and tostring(requestedDepth) or "Bedrock")
-  term.setCursorPos(2, 9)
+  write(state.current .. " / " .. state.mined)
+  term.setCursorPos(2, 8)
   paint(colors.lightGray)
   write("Fuel: ")
   paint(colors.lime)
   write(tostring(fuelLevel()))
-  term.setCursorPos(2, 10)
-  paint(colors.lightGray)
-  write("Inventory: ")
   local used = 0
   for slot = 1, 16 do if turtle.getItemCount(slot) > 0 then used = used + 1 end end
+  term.setCursorPos(2, 9)
+  paint(colors.lightGray)
+  write("Inventory: ")
   paint(used == 16 and colors.red or colors.lime)
-  write(used .. "/16 slots")
-  term.setCursorPos(2, 12)
+  write(used .. "/16")
+  term.setCursorPos(2, 11)
   paint(colors.yellow)
-  print(message or "Mining...")
+  print(message or "Working...")
   paint(colors.white)
 end
 
-local function saveState()
-  local handle = fs.open(stateFile, "w")
-  handle.write(textutils.serialize(state))
-  handle.close()
-end
-
-fuelLevel = function()
-  local value = turtle.getFuelLevel()
-  return value == "unlimited" and math.huge or value
-end
-
-local function inventoryFull()
-  for slot = 1, 16 do
-    if turtle.getItemCount(slot) == 0 then return false end
+local function menuNumber(label, minimum, allowZero)
+  while true do
+    term.setCursorPos(2, 1)
+    term.clearLine()
+    paint(colors.cyan)
+    write(label)
+    paint(colors.white)
+    write(": ")
+    local value = tonumber(read())
+    if value and (value >= minimum or (allowZero and value == 0)) then return math.floor(value) end
+    paint(colors.red)
+    print("Please enter a valid whole number.")
   end
-  return true
 end
 
+local function setupMenu()
+  term.setBackgroundColor(colors.black)
+  term.clear()
+  term.setCursorPos(1, 1)
+  term.setBackgroundColor(colors.blue)
+  paint(colors.white)
+  print(" QuarryOS | NEW QUARRY SETUP ")
+  term.setBackgroundColor(colors.black)
+  term.setCursorPos(2, 3)
+  paint(colors.lightGray)
+  print("Service chest check: ")
+  if not peripheral.isPresent("top") then
+    paint(colors.red)
+    print("No chest found above the turtle.")
+    paint(colors.white)
+    print("Place a chest directly above it, then run again.")
+    return nil
+  end
+  paint(colors.lime)
+  print("Chest detected above the turtle.")
+  paint(colors.lightGray)
+  print("The chest stores both mined items and fuel.")
+  print("")
+  local width = menuNumber("Width (blocks)", 1, false)
+  local length = menuNumber("Length (blocks)", 1, false)
+  local maximum = menuNumber("Depth (0 = bedrock)", 1, true)
+  return {
+    width = width, length = length, maximum = maximum,
+    targetX = 0, targetZ = 0, x = 0, z = 0, heading = 0,
+    current = 0, mined = 0, phase = "ready",
+  }
+end
+
+if not state then
+  state = setupMenu()
+  if not state then return end
+  saveState()
+end
+
+-- Heading: 0=east, 1=south, 2=west, 3=north. Coordinates are saved after
+-- every surface move, so a restart while travelling can safely return home.
+local vectors = { [0] = { 1, 0 }, [1] = { 0, 1 }, [2] = { -1, 0 }, [3] = { 0, -1 } }
+local function turnRight()
+  turtle.turnRight()
+  state.heading = (state.heading + 1) % 4
+  saveState()
+end
+local function face(direction)
+  while state.heading ~= direction do turnRight() end
+end
+local function surfaceForward()
+  while not turtle.forward() do
+    if turtle.detect() then turtle.dig() else sleep(0.2) end
+  end
+  local vector = vectors[state.heading]
+  state.x = state.x + vector[1]
+  state.z = state.z + vector[2]
+  saveState()
+end
+local function moveTo(x, z)
+  if state.x ~= x then
+    face(x > state.x and 0 or 2)
+    while state.x ~= x do surfaceForward() end
+  end
+  if state.z ~= z then
+    face(z > state.z and 1 or 3)
+    while state.z ~= z do surfaceForward() end
+  end
+  face(0)
+end
 local function moveUp()
-  while not turtle.up() do
-    if turtle.detectUp() then turtle.digUp() else sleep(0.2) end
-  end
+  while not turtle.up() do if turtle.detectUp() then turtle.digUp() else sleep(0.2) end end
   state.current = state.current - 1
   saveState()
-  dashboard("Returning to service chest...")
 end
-
 local function moveDown()
   while not turtle.down() do sleep(0.2) end
   state.current = state.current + 1
   saveState()
-  dashboard("Resuming quarry...")
 end
-
 local function returnToSurface()
   while state.current > 0 do moveUp() end
 end
 
-local function resumeMiningDepth()
-  while state.current < state.mined do moveDown() end
-end
-
-local function serviceAtSurface()
-  returnToSurface()
-  dashboard("Unloading all items...")
-  print("Unloading everything to the chest above the turtle...")
+local function serviceChest()
+  dashboard("Unloading into service chest...")
   for slot = 1, 16 do
     turtle.select(slot)
     if turtle.getItemCount(slot) > 0 and not turtle.dropUp() then
-      printError("The service chest is full. Empty it and run the program again.")
+      printError("Service chest is full. Empty it and restart the quarry.")
       return false
     end
   end
-
-  -- Loot and fuel may share the chest. Non-fuel items are returned to it.
-  local targetFuel = (state.mined + 20) * 2
+  local depthBudget = state.maximum == 0 and 1024 or state.maximum * 2 + 80
   local attempts = 0
-  while fuelLevel() < targetFuel and attempts < 128 do
+  while fuelLevel() < depthBudget and attempts < 256 do
     turtle.select(16)
     if not turtle.suckUp(1) then break end
     if turtle.refuel(0) then turtle.refuel(1) else turtle.dropUp() end
     attempts = attempts + 1
   end
-  if fuelLevel() < targetFuel then
-    printError("No usable fuel in the service chest. Add coal or another fuel.")
+  if fuelLevel() < depthBudget then
+    printError("Add more fuel to the service chest, then restart the quarry.")
     return false
   end
-
-  print("Refuelled. Returning to depth " .. state.mined .. "...")
-  dashboard("Refuelled - returning to quarry...")
-  resumeMiningDepth()
   return true
 end
 
-if state.finished then
-  print("Previous quarry finished; returning to the surface.")
+local function goHomeAndService()
   returnToSurface()
-  fs.delete(stateFile)
-  return
+  moveTo(0, 0)
+  return serviceChest()
 end
 
-state.maximum = requestedDepth
-saveState()
-print("QuarryOS vertical quarry started.")
-dashboard("Starting quarry...")
-if state.current > 0 then
-  print("Resuming from depth " .. state.current .. ".")
+local function mineColumn()
+  state.phase = "mining"
+  saveState()
+  while state.current < state.mined do moveDown() end
+  while state.maximum == 0 or state.mined < state.maximum do
+    if fuelLevel() < (state.current + 20) * 2 then
+      state.phase = "returning"
+      saveState()
+      return false
+    end
+    if turtle.down() then
+      state.current = state.current + 1
+      state.mined = state.current
+      saveState()
+      dashboard("Mining column...")
+    elseif turtle.detectDown() and turtle.digDown() then
+      -- Step into the mined block on the next iteration.
+    else
+      return true
+    end
+  end
+  return true
 end
 
--- A restart can happen while the turtle was returning for service. Resume its
--- previous mining depth, servicing first when it cannot safely make the trip.
-if state.current < state.mined then
-  if state.current == 0 and fuelLevel() < (state.mined + 20) * 2 then
-    if not serviceAtSurface() then return end
+local function advanceColumn()
+  state.mined = 0
+  state.current = 0
+  state.targetX = state.targetX + 1
+  if state.targetX >= state.width then
+    state.targetX = 0
+    state.targetZ = state.targetZ + 1
+  end
+  state.phase = "ready"
+  saveState()
+end
+
+-- Recover from a restart during a return trip before deciding the next action.
+if state.phase == "returning" then
+  dashboard("Resuming return to service chest...")
+  if not goHomeAndService() then return end
+  state.phase = "ready"
+  saveState()
+end
+
+while state.targetZ < state.length do
+  dashboard("Travelling to next column...")
+  if state.current > 0 then
+    -- A restart while mining: continue exactly at the recorded depth.
+    local finished = mineColumn()
+    if not finished then
+      if not goHomeAndService() then return end
+    else
+      returnToSurface()
+      if not goHomeAndService() then return end
+      advanceColumn()
+    end
   else
-    resumeMiningDepth()
+    if state.x ~= 0 or state.z ~= 0 then moveTo(0, 0) end
+    if not serviceChest() then return end
+    moveTo(state.targetX, state.targetZ)
+    local finished = mineColumn()
+    if not finished then
+      if not goHomeAndService() then return end
+    else
+      returnToSurface()
+      if not goHomeAndService() then return end
+      advanceColumn()
+    end
   end
 end
 
-while not requestedDepth or state.mined < requestedDepth do
-  if inventoryFull() or fuelLevel() < (state.mined + 20) * 2 then
-    if not serviceAtSurface() then return end
-  end
-
-  if turtle.down() then
-    state.current = state.current + 1
-    state.mined = state.current
-    saveState()
-    dashboard("Mining...")
-  elseif turtle.detectDown() and turtle.digDown() then
-    -- Move into the mined block during the next iteration.
-  else
-    print("Stopped at an unbreakable block after " .. state.mined .. " layers.")
-    break
-  end
-end
-
-state.finished = true
-saveState()
-dashboard("Quarry complete - returning home...")
-returnToSurface()
+term.setBackgroundColor(colors.black)
+term.clear()
+term.setCursorPos(1, 1)
+paint(colors.lime)
+print("Quarry complete. All columns were delivered to the service chest.")
+paint(colors.white)
 fs.delete(stateFile)
-print("Quarry complete. The turtle is back at the surface.")
