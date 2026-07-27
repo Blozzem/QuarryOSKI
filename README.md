@@ -38,8 +38,11 @@ On a CC:Tweaked computer, run:
 wget run https://raw.githubusercontent.com/Blozzem/QuarryOSKI/main/install.lua
 ```
 
-The installer downloads QuarryOS to `/quarryos` and creates `/startup`. If a
-startup program already exists, it is copied to `/startup.quarryos-backup`.
+The installer downloads QuarryOS to `/quarryos`, detects the device and creates
+the right `/startup` program automatically: QuarryOS on a turtle, the monitor
+server on a computer with a monitor, or a GPS host on a normal computer. GPS
+hosts ask for their coordinates when no existing GPS network can locate them.
+If a startup program already exists, it is copied to `/startup.quarryos-backup`.
 
 After installation, reboot the computer or execute `startup`.
 
