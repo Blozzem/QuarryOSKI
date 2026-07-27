@@ -23,6 +23,10 @@ if state and not state.width then
   print("Old quarry state backed up to /quarryos/quarry-state.legacy")
 end
 
+if state and not state.stats then
+  state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 }
+end
+
 local function saveState()
   local handle = fs.open(stateFile, "w")
   handle.write(textutils.serialize(state))
@@ -73,6 +77,11 @@ local function dashboard(message)
   paint(used == 16 and colors.red or colors.lime)
   write(used .. "/16")
   term.setCursorPos(2, 11)
+  paint(colors.lightGray)
+  write("Blocks mined: ")
+  paint(colors.white)
+  write(tostring(state.stats.blocks))
+  term.setCursorPos(2, 12)
   paint(colors.yellow)
   print(message or "Working...")
   paint(colors.white)
@@ -104,17 +113,17 @@ local function setupMenu()
   term.setCursorPos(2, 3)
   paint(colors.lightGray)
   print("Service chest check: ")
-  if not peripheral.isPresent("top") then
+  if not peripheral.isPresent("top") or not peripheral.isPresent("left") or not peripheral.isPresent("right") then
     paint(colors.red)
-    print("No chest found above the turtle.")
+    print("Missing chest: top, left and right are required.")
     paint(colors.white)
-    print("Place a chest directly above it, then run again.")
+    print("Top=fuel, left=ores, right=blocks. Run again.")
     return nil
   end
   paint(colors.lime)
-  print("Chest detected above the turtle.")
+  print("Service chests detected.")
   paint(colors.lightGray)
-  print("The chest stores both mined items and fuel.")
+  print("Top=fuel, left=ores, right=blocks.")
   print("")
   local width = menuNumber("Width (blocks)", 1, false)
   local length = menuNumber("Length (blocks)", 1, false)
@@ -123,6 +132,7 @@ local function setupMenu()
     width = width, length = length, maximum = maximum,
     targetX = 0, targetZ = 0, x = 0, z = 0, heading = 0,
     current = 0, mined = 0, phase = "ready",
+    stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
   }
 end
 
@@ -145,11 +155,14 @@ local function face(direction)
 end
 local function surfaceForward()
   while not turtle.forward() do
-    if turtle.detect() then turtle.dig() else sleep(0.2) end
+    if turtle.detect() then
+      if turtle.dig() then state.stats.blocks = state.stats.blocks + 1 end
+    else sleep(0.2) end
   end
   local vector = vectors[state.heading]
   state.x = state.x + vector[1]
   state.z = state.z + vector[2]
+  state.stats.surfaceMoves = state.stats.surfaceMoves + 1
   saveState()
 end
 local function moveTo(x, z)
@@ -164,13 +177,17 @@ local function moveTo(x, z)
   face(0)
 end
 local function moveUp()
-  while not turtle.up() do if turtle.detectUp() then turtle.digUp() else sleep(0.2) end end
+  while not turtle.up() do
+    if turtle.detectUp() then if turtle.digUp() then state.stats.blocks = state.stats.blocks + 1 end else sleep(0.2) end
+  end
   state.current = state.current - 1
+  state.stats.verticalMoves = state.stats.verticalMoves + 1
   saveState()
 end
 local function moveDown()
   while not turtle.down() do sleep(0.2) end
   state.current = state.current + 1
+  state.stats.verticalMoves = state.stats.verticalMoves + 1
   saveState()
 end
 local function returnToSurface()
@@ -179,11 +196,21 @@ end
 
 local function serviceChest()
   dashboard("Unloading into service chest...")
+  state.stats.services = state.stats.services + 1
+  saveState()
   for slot = 1, 16 do
     turtle.select(slot)
-    if turtle.getItemCount(slot) > 0 and not turtle.dropUp() then
-      printError("Service chest is full. Empty it and restart the quarry.")
-      return false
+    if turtle.getItemCount(slot) > 0 then
+      local detail = turtle.getItemDetail(slot)
+      local name = detail and detail.name or ""
+      local valuable = name:find("ore") or name:find("raw_") or name:find("diamond") or name:find("emerald") or name:find("lapis") or name:find("redstone") or name:find("quartz") or name:find("ancient_debris")
+      if valuable then turnRight(); turnRight(); turnRight() else turnRight() end
+      local dropped = turtle.drop()
+      if valuable then turnRight() else turnRight(); turnRight(); turnRight() end
+      if not dropped then
+        printError("Output chest is full. Empty it and restart the quarry.")
+        return false
+      end
     end
   end
   local depthBudget = state.maximum == 0 and 1024 or state.maximum * 2 + 80
@@ -223,6 +250,7 @@ local function mineColumn()
       saveState()
       dashboard("Mining column...")
     elseif turtle.detectDown() and turtle.digDown() then
+      state.stats.blocks = state.stats.blocks + 1
       -- Step into the mined block on the next iteration.
     else
       return true
@@ -284,4 +312,7 @@ term.setCursorPos(1, 1)
 paint(colors.lime)
 print("Quarry complete. All columns were delivered to the service chest.")
 paint(colors.white)
+local statsHandle = fs.open("/quarryos/quarry-last-stats", "w")
+statsHandle.write(textutils.serialize(state.stats))
+statsHandle.close()
 fs.delete(stateFile)
