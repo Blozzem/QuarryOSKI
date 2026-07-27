@@ -1,7 +1,7 @@
 # QuarryOS
 
-QuarryOS is a small, keyboard-first operating environment for
-[CC:Tweaked](https://tweaked.cc/) computers and turtles. It is designed to run
+QuarryOS is a colour-first operating environment for
+[CC:Tweaked](https://tweaked.cc/) **Advanced Turtles**. It is designed to run
 inside a Minecraft NeoForge world where CC:Tweaked is installed.
 
 It is deliberately a ComputerCraft program collection—not a replacement for
@@ -24,6 +24,7 @@ computers, advanced computers, turtles and pocket computers.
 - Minecraft Java Edition with NeoForge
 - [CC:Tweaked](https://modrinth.com/mod/cc-tweaked) for the same Minecraft
   version and loader
+- An Advanced Turtle (regular turtles are intentionally not supported)
 - An internet-enabled ComputerCraft computer (`http` must be enabled by the
   server or single-player configuration) for the one-line installer
 
