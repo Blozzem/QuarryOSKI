@@ -62,7 +62,7 @@ starting corner, sorts its items into the output chests, refuels and continues
 with the next column. Progress survives restarts. Use `stats` to view statistics
 for the last completed quarry.
 
-Quarry plans include Small (8x8), Medium (16x16), Large (32x32) and a custom
+Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
 previous jobs and `selftest` to check the complete setup.
 

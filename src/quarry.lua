@@ -204,15 +204,15 @@ local function setupMenu()
   end
   print("")
   print("Select quarry plan:")
-  print("  1) Small  8 x 8  to bedrock")
-  print("  2) Medium 16 x 16 to bedrock")
-  print("  3) Large  32 x 32 to bedrock")
+  print("  1) Small  16 x 16 to bedrock")
+  print("  2) Medium 32 x 32 to bedrock")
+  print("  3) Large  64 x 64 to bedrock")
   print("  4) Custom size")
   local choice = menuNumber("Plan", 1, false)
   local width, length, maximum
-  if choice == 1 then width, length, maximum = 8, 8, 0
-  elseif choice == 2 then width, length, maximum = 16, 16, 0
-  elseif choice == 3 then width, length, maximum = 32, 32, 0
+  if choice == 1 then width, length, maximum = 16, 16, 0
+  elseif choice == 2 then width, length, maximum = 32, 32, 0
+  elseif choice == 3 then width, length, maximum = 64, 64, 0
   elseif choice == 4 then
     width = menuNumber("Width (blocks)", 1, false)
     length = menuNumber("Length (blocks)", 1, false)
