@@ -27,6 +27,12 @@ if state and not state.stats then
   state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 }
 end
 
+if state and not state.origin then
+  printError("This old quarry has no GPS position record and cannot resume safely.")
+  print("Start a new quarry after moving the turtle back to its start corner.")
+  return
+end
+
 local function saveState()
   local handle = fs.open(stateFile, "w")
   handle.write(textutils.serialize(state))
@@ -159,6 +165,27 @@ local function setupMenu()
     print("Fix the service chests, then run QuarryOS again.")
     return nil
   end
+  term.setCursorPos(2, 9)
+  paint(colors.lightGray)
+  print("Checking GPS position and facing direction...")
+  local originX, originY, originZ = gps.locate(5)
+  if not originX then
+    paint(colors.red)
+    print("GPS is required. Set up GPS host computers, then run again.")
+    return nil
+  end
+  if not turtle.forward() then
+    paint(colors.red)
+    print("The block in front must be clear for the GPS direction check.")
+    return nil
+  end
+  local forwardX, _, forwardZ = gps.locate(5)
+  turtle.back()
+  if not forwardX then
+    paint(colors.red)
+    print("GPS direction check failed. Run again near GPS coverage.")
+    return nil
+  end
   print("")
   local width = menuNumber("Width (blocks)", 1, false)
   local length = menuNumber("Length (blocks)", 1, false)
@@ -168,6 +195,7 @@ local function setupMenu()
     targetX = 0, targetZ = 0, x = 0, z = 0, heading = 0,
     current = 0, mined = 0, phase = "ready",
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
+    origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
   }
 end
 
@@ -180,6 +208,28 @@ elseif not preflightCheck(true) then
   print("Fix the service chests before resuming this quarry.")
   return
 end
+
+local function verifySavedPosition()
+  local x, y, z = gps.locate(5)
+  if not x then
+    printError("GPS is unavailable. QuarryOS will not resume without a position check.")
+    return false
+  end
+  local origin = state.origin
+  local rightX, rightZ = -origin.forwardZ, origin.forwardX
+  local expectedX = origin.x + origin.forwardX * state.x + rightX * state.z
+  local expectedY = origin.y - state.current
+  local expectedZ = origin.z + origin.forwardZ * state.x + rightZ * state.z
+  if x ~= expectedX or y ~= expectedY or z ~= expectedZ then
+    printError("Turtle position does not match the saved quarry position.")
+    print("Expected: " .. expectedX .. ", " .. expectedY .. ", " .. expectedZ)
+    print("Found:    " .. x .. ", " .. y .. ", " .. z)
+    return false
+  end
+  return true
+end
+
+if not verifySavedPosition() then return end
 
 -- Heading: 0=east, 1=south, 2=west, 3=north. Coordinates are saved after
 -- every surface move, so a restart while travelling can safely return home.

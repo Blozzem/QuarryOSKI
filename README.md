@@ -25,6 +25,8 @@ computers, advanced computers, turtles and pocket computers.
 - [CC:Tweaked](https://modrinth.com/mod/cc-tweaked) for the same Minecraft
   version and loader
 - An Advanced Turtle (regular turtles are intentionally not supported)
+- A CC:Tweaked GPS network; QuarryOS uses it to prevent unsafe resumes if the
+  turtle was moved after a restart
 - An internet-enabled ComputerCraft computer (`http` must be enabled by the
   server or single-player configuration) for the one-line installer
 
