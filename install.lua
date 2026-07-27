@@ -5,9 +5,9 @@ local branch = "main"
 local root = "/quarryos"
 
 local files = {
-  ["src/startup.lua"] = "/startup",
-  ["src/quarryos/kernel.lua"] = root .. "/kernel.lua",
-  ["src/quarryos/lib/ui.lua"] = root .. "/lib/ui.lua",
+  ["startup.lua"] = "/startup",
+  ["kernel.lua"] = root .. "/kernel.lua",
+  ["ui.lua"] = root .. "/ui.lua",
 }
 
 if not http.checkURL("https://raw.githubusercontent.com") then
