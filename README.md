@@ -57,6 +57,9 @@ and travels back to its previous depth before continuing. It returns to the
 starting height when complete. Use `/quarryos/quarry.lua <depth>` to set a
 maximum depth.
 
+If Minecraft or the server restarts, run `/quarryos/quarry.lua` again on the
+same turtle. QuarryOS restores its saved depth and continues the current shaft.
+
 ## In-game updates
 
 Run `update` from the QuarryOS shell to download the current version in place.

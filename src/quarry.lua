@@ -1,10 +1,28 @@
--- QuarryOS Turtle quarry. Place a chest with fuel directly ABOVE the turtle's
--- starting position. It unloads to and refuels from that chest when needed.
+-- QuarryOS Turtle quarry. A service chest with fuel belongs directly ABOVE
+-- the starting position. Progress is stored after every vertical movement.
 local requestedDepth = tonumber(({ ... })[1])
+local stateFile = "/quarryos/quarry-state"
 
 if not turtle then
   printError("This program must run on a turtle.")
   return
+end
+
+local function loadState()
+  if not fs.exists(stateFile) then return { current = 0, mined = 0 } end
+  local handle = fs.open(stateFile, "r")
+  local state = textutils.unserialize(handle.readAll())
+  handle.close()
+  return state or { current = 0, mined = 0 }
+end
+
+local state = loadState()
+requestedDepth = requestedDepth or state.maximum
+
+local function saveState()
+  local handle = fs.open(stateFile, "w")
+  handle.write(textutils.serialize(state))
+  handle.close()
 end
 
 local function fuelLevel()
@@ -19,24 +37,30 @@ local function inventoryFull()
   return true
 end
 
-local function returnToSurface(depth)
-  while depth > 0 do
-    if not turtle.up() then
-      if turtle.detectUp() then turtle.digUp() else sleep(0.2) end
-    else
-      depth = depth - 1
-    end
+local function moveUp()
+  while not turtle.up() do
+    if turtle.detectUp() then turtle.digUp() else sleep(0.2) end
   end
+  state.current = state.current - 1
+  saveState()
 end
 
-local function descendTo(depth)
-  for _ = 1, depth do
-    while not turtle.down() do sleep(0.2) end
-  end
+local function moveDown()
+  while not turtle.down() do sleep(0.2) end
+  state.current = state.current + 1
+  saveState()
 end
 
-local function serviceAtSurface(depth)
-  returnToSurface(depth)
+local function returnToSurface()
+  while state.current > 0 do moveUp() end
+end
+
+local function resumeMiningDepth()
+  while state.current < state.mined do moveDown() end
+end
+
+local function serviceAtSurface()
+  returnToSurface()
   print("Unloading everything to the chest above the turtle...")
   for slot = 1, 16 do
     turtle.select(slot)
@@ -46,19 +70,13 @@ local function serviceAtSurface(depth)
     end
   end
 
-  -- The same chest may contain both loot and fuel. Non-fuel items are put
-  -- back immediately; this walks through the chest until usable fuel is found.
-  local targetFuel = (depth + 20) * 2
+  -- Loot and fuel may share the chest. Non-fuel items are returned to it.
+  local targetFuel = (state.mined + 20) * 2
   local attempts = 0
   while fuelLevel() < targetFuel and attempts < 128 do
     turtle.select(16)
     if not turtle.suckUp(1) then break end
-    if turtle.refuel(0) then
-      turtle.refuel(1)
-    elseif not turtle.dropUp() then
-      printError("The service chest is full. Empty it and run the program again.")
-      return false
-    end
+    if turtle.refuel(0) then turtle.refuel(1) else turtle.dropUp() end
     attempts = attempts + 1
   end
   if fuelLevel() < targetFuel then
@@ -66,30 +84,54 @@ local function serviceAtSurface(depth)
     return false
   end
 
-  print("Refuelled. Returning to depth " .. depth .. "...")
-  descendTo(depth)
+  print("Refuelled. Returning to depth " .. state.mined .. "...")
+  resumeMiningDepth()
   return true
 end
 
-local depth = 0
-print("QuarryOS vertical quarry started.")
-print("Place one service chest with fuel above the starting position.")
+if state.finished then
+  print("Previous quarry finished; returning to the surface.")
+  returnToSurface()
+  fs.delete(stateFile)
+  return
+end
 
-while not requestedDepth or depth < requestedDepth do
-  -- Reserve enough fuel to return to the surface, plus a small digging margin.
-  if inventoryFull() or fuelLevel() < (depth + 20) * 2 then
-    if not serviceAtSurface(depth) then return end
+state.maximum = requestedDepth
+saveState()
+print("QuarryOS vertical quarry started.")
+if state.current > 0 then
+  print("Resuming from depth " .. state.current .. ".")
+end
+
+-- A restart can happen while the turtle was returning for service. Resume its
+-- previous mining depth, servicing first when it cannot safely make the trip.
+if state.current < state.mined then
+  if state.current == 0 and fuelLevel() < (state.mined + 20) * 2 then
+    if not serviceAtSurface() then return end
+  else
+    resumeMiningDepth()
+  end
+end
+
+while not requestedDepth or state.mined < requestedDepth do
+  if inventoryFull() or fuelLevel() < (state.mined + 20) * 2 then
+    if not serviceAtSurface() then return end
   end
 
   if turtle.down() then
-    depth = depth + 1
+    state.current = state.current + 1
+    state.mined = state.current
+    saveState()
   elseif turtle.detectDown() and turtle.digDown() then
-    -- The next iteration moves into the just-mined block.
+    -- Move into the mined block during the next iteration.
   else
-    print("Stopped at an unbreakable block after " .. depth .. " layers.")
+    print("Stopped at an unbreakable block after " .. state.mined .. " layers.")
     break
   end
 end
 
-returnToSurface(depth)
+state.finished = true
+saveState()
+returnToSurface()
+fs.delete(stateFile)
 print("Quarry complete. The turtle is back at the surface.")
