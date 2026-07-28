@@ -22,7 +22,7 @@ local function printHelp()
   print("  edit <file>          Open the native editor")
   print("  run <program> [...]  Run a program")
   print("  update               Download the latest QuarryOS version")
-  print("  quarry | q           Open the quarry setup menu")
+  print("  quarry | q [new]     Resume quarry or plan a new one")
   print("  stats                Show the last completed quarry statistics")
   print("  history              Show completed quarry jobs")
   print("  selftest             Check GPS, chests, fuel and modem")
@@ -109,8 +109,9 @@ builtins.update = function()
   shell.run("/quarryos/update.lua")
 end
 
-builtins.quarry = function()
-  shell.run("/quarryos/quarry.lua")
+builtins.quarry = function(arguments)
+  table.remove(arguments, 1)
+  shell.run("/quarryos/quarry.lua", table.unpack(arguments))
 end
 builtins.q = builtins.quarry
 

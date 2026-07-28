@@ -4,11 +4,40 @@ local function result(label, ok, extra)
   term.setTextColor(colors.white)
 end
 
+local function isStorage(detail)
+  if not detail or not detail.name then return false end
+  local name = detail.name:lower()
+  return name:find("chest") or name:find("barrel") or name:find("shulker")
+    or name:find("crate") or name:find("drawer")
+end
+
+local function storageAt(side)
+  if not turtle then return false, "not a turtle" end
+  local present, detail
+  if side == "top" then
+    present, detail = turtle.inspectUp()
+  elseif side == "left" then
+    turtle.turnLeft()
+    present, detail = turtle.inspect()
+    turtle.turnRight()
+  else
+    turtle.turnRight()
+    present, detail = turtle.inspect()
+    turtle.turnLeft()
+  end
+  return present and isStorage(detail), detail and detail.name or "air"
+end
+
 print("QuarryOS self-test")
 result("Advanced Turtle", turtle ~= nil and term.isColor())
-result("Fuel chest (top)", peripheral.isPresent("top"))
-result("Ore chest (left)", peripheral.isPresent("left"))
-result("Block chest (right)", peripheral.isPresent("right"))
+if turtle then
+  local fuelChest, fuelName = storageAt("top")
+  local oreChest, oreName = storageAt("left")
+  local blockChest, blockName = storageAt("right")
+  result("Fuel chest (top)", fuelChest, fuelName)
+  result("Ore chest (left)", oreChest, oreName)
+  result("Block chest (right)", blockChest, blockName)
+end
 local x = gps.locate(3)
 result("GPS", x ~= nil)
 local modem = false

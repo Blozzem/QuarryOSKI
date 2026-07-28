@@ -1,42 +1,105 @@
--- QuarryOS Advanced Turtle quarry. The service chest belongs directly above
--- the turtle's starting corner. Width, length and depth are chosen in-game.
+-- QuarryOS Advanced Turtle layer quarry.
+-- The turtle starts at the top corner, mines one full horizontal layer below
+-- itself in a zig-zag path, then descends to the next layer.
+local arguments = { ... }
 local stateFile = "/quarryos/quarry-state"
+local stateBackupFile = stateFile .. ".bak"
+local stateTemporaryFile = stateFile .. ".tmp"
+-- Keep the route format explicit. A saved plan from another quarry layout must
+-- never be resumed with this route, even if its other fields look compatible.
+local stateLayout = "layer-zigzag-v1"
 
 if not turtle then printError("This program must run on an Advanced Turtle.") return end
 if not term.isColor() then printError("QuarryOS requires an Advanced Turtle.") return end
 
-local function loadState()
-  if not fs.exists(stateFile) then return nil end
-  local handle = fs.open(stateFile, "r")
-  local value = textutils.unserialize(handle.readAll())
+local function readState(path)
+  if not fs.exists(path) then return nil end
+  local handle = fs.open(path, "r")
+  if not handle then return nil end
+  local content = handle.readAll()
   handle.close()
-  return value
+  local ok, value = pcall(textutils.unserialize, content)
+  return ok and value or nil
 end
 
-local state = loadState()
+local function loadState()
+  local primary = readState(stateFile)
+  if primary then return primary, false end
+  local backup = readState(stateBackupFile)
+  if backup then return backup, true end
+  return nil, false
+end
 
--- Preserve an unfinished shaft from older QuarryOS releases instead of trying
--- to interpret it as an area-quarry plan.
-if state and not state.width then
-  fs.move(stateFile, stateFile .. ".legacy")
+local function archiveState(label)
+  local target = stateFile .. "." .. label .. "-" .. tostring(os.epoch("utc"))
+  local suffix = 1
+  while fs.exists(target) do
+    target = stateFile .. "." .. label .. "-" .. tostring(os.epoch("utc")) .. "-" .. suffix
+    suffix = suffix + 1
+  end
+  if fs.exists(stateFile) then
+    fs.move(stateFile, target)
+  elseif fs.exists(stateBackupFile) then
+    fs.move(stateBackupFile, target)
+  end
+  if fs.exists(stateBackupFile) then fs.move(stateBackupFile, target .. ".bak") end
+  if fs.exists(stateTemporaryFile) then fs.delete(stateTemporaryFile) end
+  return target
+end
+
+if arguments[1] and arguments[1] ~= "new" then
+  print("Usage: quarry [new]")
+  print("  quarry      Resume the saved quarry, or plan one when none exists.")
+  print("  quarry new  Archive the saved quarry and plan a new one.")
+  return
+end
+
+local state, recoveredFromBackup = loadState()
+local hasSavedState = fs.exists(stateFile) or fs.exists(stateBackupFile)
+if arguments[1] == "new" and hasSavedState then
+  local archived = archiveState("cancelled")
   state = nil
-  print("Old quarry state backed up to /quarryos/quarry-state.legacy")
+  print("Previous quarry progress archived to " .. archived)
+end
+
+if hasSavedState and not state and arguments[1] ~= "new" then
+  printError("The saved quarry state is damaged. Run 'q new' to archive it and start again.")
+  return
+end
+if recoveredFromBackup and arguments[1] ~= "new" then print("Recovered the last valid quarry state backup.") end
+
+-- A plan from a different route layout cannot be interpreted safely here.
+if state and state.layout ~= stateLayout then
+  local archived = archiveState("legacy")
+  state = nil
+  print("Old column-quarry progress was archived to " .. archived)
+  print("Layer mode needs a new quarry plan.")
+end
+
+if state and not state.origin then
+  printError("The saved quarry has no GPS record. Run 'q new' at the starting corner.")
+  return
 end
 
 if state and not state.stats then
   state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 }
 end
-
-if state and not state.origin then
-  printError("This old quarry has no GPS position record and cannot resume safely.")
-  print("Start a new quarry after moving the turtle back to its start corner.")
-  return
+if state then
+  state.bedrockFound = state.bedrockFound or false
+  state.layerComplete = state.layerComplete or false
 end
 
 local function saveState()
-  local handle = fs.open(stateFile, "w")
+  if fs.exists(stateTemporaryFile) then fs.delete(stateTemporaryFile) end
+  local handle = fs.open(stateTemporaryFile, "w")
   handle.write(textutils.serialize(state))
   handle.close()
+  if fs.exists(stateBackupFile) then fs.delete(stateBackupFile) end
+  if fs.exists(stateFile) then
+    fs.copy(stateFile, stateBackupFile)
+    fs.delete(stateFile)
+  end
+  fs.move(stateTemporaryFile, stateFile)
 end
 
 local function fuelLevel()
@@ -44,10 +107,13 @@ local function fuelLevel()
   return fuel == "unlimited" and math.huge or fuel
 end
 
--- The setup wizard has to move forward and back once to record its GPS
--- direction. Fill those first two movement fuel points from the chest above
--- before attempting that check, otherwise an empty turtle gives a misleading
--- "cannot move" error even though its fuel chest is correctly placed.
+local function fuelCapacity()
+  local capacity = turtle.getFuelLimit()
+  return capacity == "unlimited" and math.huge or capacity
+end
+
+-- The direction check moves forward and back once. Load its two movement
+-- points from the chest above before the first movement attempt.
 local function loadSetupFuel(required)
   if fuelLevel() >= required then return true end
 
@@ -75,9 +141,8 @@ end
 
 local function paint(colour) term.setTextColor(colour) end
 
--- Rednet only broadcasts through opened modems. A turtle normally has its
--- Ender/Wireless Modem mounted as its second upgrade, so open it here before
--- the first live-monitor update is sent.
+-- Rednet only broadcasts through opened modems. The turtle modem is normally
+-- its second upgrade, next to the mining tool.
 local monitorNetworkReady = false
 local function openMonitorModems()
   local opened = false
@@ -96,10 +161,15 @@ end
 monitorNetworkReady = openMonitorModems()
 
 local function broadcastMonitor(message)
+  local total = state.width * state.length
   local payload = {
     width = state.width, length = state.length, maximum = state.maximum,
-    columnX = state.targetX, columnZ = state.targetZ,
-    current = state.current, mined = state.mined,
+    -- The work area begins one block in front of the service corner, so turn
+    -- the local X coordinate back into a zero-based in-area monitor position.
+    columnX = math.max(0, state.x - 1), columnZ = state.z,
+    current = state.depth, mined = state.layer,
+    layer = state.layer, nextCell = state.nextCell, totalCells = total,
+    positionStep = state.positionStep + 1, progressStep = total,
     fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
   }
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
@@ -115,47 +185,54 @@ local function notify(message)
 end
 
 local function dashboard(message)
-  local width = term.getSize()
+  local screenWidth = term.getSize()
+  local total = state.width * state.length
   term.setBackgroundColor(colors.black)
   term.clear()
   term.setCursorPos(1, 1)
   term.setBackgroundColor(colors.blue)
   paint(colors.white)
-  write(" QuarryOS | ADVANCED QUARRY")
-  write(string.rep(" ", math.max(0, width - 28)))
+  write(" QuarryOS | LAYER QUARRY")
+  write(string.rep(" ", math.max(0, screenWidth - 25)))
   term.setBackgroundColor(colors.black)
+
   term.setCursorPos(2, 3)
   paint(colors.cyan)
   write("AREA  " .. state.width .. " x " .. state.length .. "  |  ")
   write(state.maximum == 0 and "BEDROCK" or ("DEPTH " .. state.maximum))
   term.setCursorPos(2, 5)
   paint(colors.lightGray)
-  write("Column: ")
+  write("Layer: ")
   paint(colors.white)
-  write((state.targetX + 1) .. "/" .. state.width .. "  " .. (state.targetZ + 1) .. "/" .. state.length)
+  write(state.layer .. (state.maximum == 0 and " / bedrock" or (" / " .. state.maximum)))
   term.setCursorPos(2, 6)
   paint(colors.lightGray)
-  write("Depth: ")
+  write("Cell: ")
   paint(colors.white)
-  write(state.current .. " / " .. state.mined)
-  term.setCursorPos(2, 8)
+  write(math.min(state.nextCell + 1, total) .. "/" .. total .. "  (" .. state.x .. "," .. state.z .. ")")
+  term.setCursorPos(2, 7)
+  paint(colors.lightGray)
+  write("Work depth: ")
+  paint(colors.white)
+  write(tostring(state.depth))
+  term.setCursorPos(2, 9)
   paint(colors.lightGray)
   write("Fuel: ")
   paint(colors.lime)
   write(tostring(fuelLevel()))
   local used = 0
   for slot = 1, 16 do if turtle.getItemCount(slot) > 0 then used = used + 1 end end
-  term.setCursorPos(2, 9)
+  term.setCursorPos(2, 10)
   paint(colors.lightGray)
   write("Inventory: ")
   paint(used == 16 and colors.red or colors.lime)
   write(used .. "/16")
-  term.setCursorPos(2, 11)
+  term.setCursorPos(2, 12)
   paint(colors.lightGray)
   write("Blocks mined: ")
   paint(colors.white)
   write(tostring(state.stats.blocks))
-  term.setCursorPos(2, 12)
+  term.setCursorPos(2, 14)
   paint(colors.yellow)
   print(message or "Working...")
   paint(colors.white)
@@ -231,7 +308,6 @@ local function preflightCheck(showHeader)
       ok = false
     end
   end
-
   paint(colors.white)
   return ok
 end
@@ -267,7 +343,7 @@ local function setupMenu()
       local dug, digReason = turtle.dig()
       if dug then
         moved, moveReason = turtle.forward()
-        if moved then print("Mined the first quarry block for the GPS direction check.") end
+        if moved then print("Mined the first block for the GPS direction check.") end
       else
         paint(colors.red)
         print("Cannot mine the block in front: " .. (detail.name or "unknown block"))
@@ -295,8 +371,9 @@ local function setupMenu()
     print("GPS direction check failed. Run again near GPS coverage.")
     return nil
   end
+
   print("")
-  print("Select quarry plan:")
+  print("Select layer quarry plan:")
   print("  1) Small  16 x 16 to bedrock")
   print("  2) Medium 32 x 32 to bedrock")
   print("  3) Large  64 x 64 to bedrock")
@@ -314,32 +391,65 @@ local function setupMenu()
     printError("Unknown plan.")
     return nil
   end
+
   local estimateDepth = maximum == 0 and 320 or maximum
   local estimatedBlocks = width * length * estimateDepth
   local estimatedFuel = estimatedBlocks * 2 + width * length * 8 + 200
+  print("Mode: every full horizontal layer is mined before descending.")
   print("Estimated blocks: " .. estimatedBlocks)
   print("Estimated fuel:  " .. estimatedFuel)
   write("Start this quarry? [Y/n] ")
   if read():lower() == "n" then return nil end
   return {
+    layout = stateLayout, version = 1,
     width = width, length = length, maximum = maximum,
-    targetX = 0, targetZ = 0, x = 0, z = 0, heading = 0,
-    current = 0, mined = 0, phase = "ready",
+    x = 0, z = 0, heading = 0, depth = 0,
+    layer = 1, nextCell = 0, positionStep = -1,
+    layerComplete = false, bedrockFound = false, phase = "surface",
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
     started = os.epoch("utc"), plan = choice,
   }
 end
 
-if not state then
-  state = setupMenu()
-  if not state then return end
-  saveState()
-  notify("Quarry started: " .. state.width .. "x" .. state.length)
-elseif state.current == 0 and state.x == 0 and state.z == 0 and not preflightCheck(true) then
-  paint(colors.white)
-  print("Fix the service chests before resuming this quarry.")
-  return
+local function worldPosition(x, z, depth)
+  local origin = state.origin
+  local rightX, rightZ = -origin.forwardZ, origin.forwardX
+  return origin.x + origin.forwardX * x + rightX * z,
+    origin.y - depth,
+    origin.z + origin.forwardZ * x + rightZ * z
+end
+
+local function resolvePendingMove()
+  local pending = state.pendingMove
+  if not pending then return true end
+  local x, y, z = gps.locate(5)
+  if not x then
+    printError("GPS is unavailable. QuarryOS cannot recover an interrupted move.")
+    return false
+  end
+  local fromX, fromY, fromZ = worldPosition(pending.fromX, pending.fromZ, pending.fromDepth)
+  local toX, toY, toZ = worldPosition(pending.x, pending.z, pending.depth)
+  if x == toX and y == toY and z == toZ then
+    state.x, state.z, state.depth = pending.x, pending.z, pending.depth
+    if pending.positionStep ~= nil then state.positionStep = pending.positionStep end
+    if pending.action == "forward" then
+      state.stats.surfaceMoves = state.stats.surfaceMoves + 1
+    else
+      state.stats.verticalMoves = state.stats.verticalMoves + 1
+    end
+    state.pendingMove = nil
+    saveState()
+    print("Recovered an interrupted " .. pending.action .. " movement.")
+    return true
+  end
+  if x == fromX and y == fromY and z == fromZ then
+    state.pendingMove = nil
+    saveState()
+    return true
+  end
+  printError("Turtle position does not match the interrupted movement record.")
+  return false
 end
 
 local function verifySavedPosition()
@@ -348,11 +458,7 @@ local function verifySavedPosition()
     printError("GPS is unavailable. QuarryOS will not resume without a position check.")
     return false
   end
-  local origin = state.origin
-  local rightX, rightZ = -origin.forwardZ, origin.forwardX
-  local expectedX = origin.x + origin.forwardX * state.x + rightX * state.z
-  local expectedY = origin.y - state.current
-  local expectedZ = origin.z + origin.forwardZ * state.x + rightZ * state.z
+  local expectedX, expectedY, expectedZ = worldPosition(state.x, state.z, state.depth)
   if x ~= expectedX or y ~= expectedY or z ~= expectedZ then
     printError("Turtle position does not match the saved quarry position.")
     print("Expected: " .. expectedX .. ", " .. expectedY .. ", " .. expectedZ)
@@ -362,62 +468,217 @@ local function verifySavedPosition()
   return true
 end
 
+if not state then
+  state = setupMenu()
+  if not state then return end
+  saveState()
+  notify("Layer quarry started: " .. state.width .. "x" .. state.length)
+elseif state.phase == "surface" and not preflightCheck(true) then
+  paint(colors.white)
+  print("Fix the service chests before resuming this quarry.")
+  return
+end
+
+if not resolvePendingMove() then return end
 if not verifySavedPosition() then return end
 
--- Heading: 0=east, 1=south, 2=west, 3=north. Coordinates are saved after
--- every surface move, so a restart while travelling can safely return home.
+-- These are local coordinates: 0 is the start-facing direction, then right,
+-- back and left. GPS conversion above uses the recorded start-facing vector.
 local vectors = { [0] = { 1, 0 }, [1] = { 0, 1 }, [2] = { -1, 0 }, [3] = { 0, -1 } }
+
 local function turnRight()
-  turtle.turnRight()
+  local turned, reason = turtle.turnRight()
+  if not turned then
+    printError("Cannot turn the turtle: " .. (reason or "unknown reason"))
+    return false
+  end
   state.heading = (state.heading + 1) % 4
   saveState()
+  return true
 end
+
 local function face(direction)
-  while state.heading ~= direction do turnRight() end
+  while state.heading ~= direction do
+    if not turnRight() then return false end
+  end
+  return true
 end
-local function surfaceForward()
-  while not turtle.forward() do
-    if turtle.detect() then
-      if turtle.dig() then state.stats.blocks = state.stats.blocks + 1 end
-    else sleep(0.2) end
+
+local function moveForward(allowDig)
+  local moved, reason = turtle.forward()
+  if not moved and allowDig then
+    local hasBlock, detail = turtle.inspect()
+    if hasBlock then
+      local dug, digReason = turtle.dig()
+      if dug then
+        state.stats.blocks = state.stats.blocks + 1
+        moved, reason = turtle.forward()
+      else
+        reason = "Cannot mine " .. (detail.name or "front block") .. ": " .. (digReason or "unknown reason")
+      end
+    end
+  end
+  if not moved then
+    printError("Cannot move forward: " .. (reason or "path blocked"))
+    return false
   end
   local vector = vectors[state.heading]
   state.x = state.x + vector[1]
   state.z = state.z + vector[2]
   state.stats.surfaceMoves = state.stats.surfaceMoves + 1
-  saveState()
-end
-local function moveTo(x, z)
-  if state.x ~= x then
-    face(x > state.x and 0 or 2)
-    while state.x ~= x do surfaceForward() end
-  end
-  if state.z ~= z then
-    face(z > state.z and 1 or 3)
-    while state.z ~= z do surfaceForward() end
-  end
-  face(0)
-end
-local function moveUp()
-  while not turtle.up() do
-    if turtle.detectUp() then if turtle.digUp() then state.stats.blocks = state.stats.blocks + 1 end else sleep(0.2) end
-  end
-  state.current = state.current - 1
-  state.stats.verticalMoves = state.stats.verticalMoves + 1
-  saveState()
-end
-local function moveDown()
-  while not turtle.down() do sleep(0.2) end
-  state.current = state.current + 1
-  state.stats.verticalMoves = state.stats.verticalMoves + 1
-  saveState()
-end
-local function returnToSurface()
-  while state.current > 0 do moveUp() end
+  return true
 end
 
-local function serviceChest()
-  dashboard("Unloading into service chest...")
+local function moveDown(allowDig)
+  state.pendingMove = {
+    action = "down", fromX = state.x, fromZ = state.z, fromDepth = state.depth,
+    x = state.x, z = state.z, depth = state.depth + 1, positionStep = state.positionStep,
+  }
+  saveState()
+  local moved, reason = turtle.down()
+  if not moved and allowDig then
+    local hasBlock, detail = turtle.inspectDown()
+    if hasBlock then
+      local dug, digReason = turtle.digDown()
+      if dug then
+        state.stats.blocks = state.stats.blocks + 1
+        moved, reason = turtle.down()
+      else
+        reason = "Cannot mine " .. (detail.name or "block below") .. ": " .. (digReason or "unknown reason")
+      end
+    end
+  end
+  if not moved then
+    state.pendingMove = nil
+    saveState()
+    printError("Cannot move down: " .. (reason or "path blocked"))
+    return false
+  end
+  state.depth = state.depth + 1
+  state.stats.verticalMoves = state.stats.verticalMoves + 1
+  state.pendingMove = nil
+  saveState()
+  return true
+end
+
+local function moveUp(allowDig)
+  state.pendingMove = {
+    action = "up", fromX = state.x, fromZ = state.z, fromDepth = state.depth,
+    x = state.x, z = state.z, depth = state.depth - 1, positionStep = state.positionStep,
+  }
+  saveState()
+  local moved, reason = turtle.up()
+  if not moved and allowDig then
+    local hasBlock, detail = turtle.inspectUp()
+    if hasBlock then
+      local dug, digReason = turtle.digUp()
+      if dug then
+        state.stats.blocks = state.stats.blocks + 1
+        moved, reason = turtle.up()
+      else
+        reason = "Cannot mine " .. (detail.name or "block above") .. ": " .. (digReason or "unknown reason")
+      end
+    end
+  end
+  if not moved then
+    state.pendingMove = nil
+    saveState()
+    printError("Cannot move up: " .. (reason or "path blocked"))
+    return false
+  end
+  state.depth = state.depth - 1
+  state.stats.verticalMoves = state.stats.verticalMoves + 1
+  state.pendingMove = nil
+  saveState()
+  return true
+end
+
+local function cellForStep(step)
+  -- Step -1 is the service corner. The actual quarry begins one block ahead,
+  -- keeping both side output chests outside the selected area.
+  if step == -1 then return 0, 0 end
+  local row = math.floor(step / state.width)
+  local column = step % state.width
+  local x = row % 2 == 0 and (column + 1) or (state.width - column)
+  return x, row
+end
+
+local function directionTo(x, z)
+  local deltaX, deltaZ = x - state.x, z - state.z
+  if deltaX == 1 and deltaZ == 0 then return 0 end
+  if deltaX == 0 and deltaZ == 1 then return 1 end
+  if deltaX == -1 and deltaZ == 0 then return 2 end
+  if deltaX == 0 and deltaZ == -1 then return 3 end
+  return nil
+end
+
+local function moveToRouteStep(step, allowDig)
+  local x, z = cellForStep(step)
+  local direction = directionTo(x, z)
+  if not direction then
+    printError("Saved layer path is not adjacent to the turtle position.")
+    return false
+  end
+  if not face(direction) then return false end
+  state.pendingMove = {
+    action = "forward", fromX = state.x, fromZ = state.z, fromDepth = state.depth,
+    x = x, z = z, depth = state.depth, positionStep = step,
+  }
+  saveState()
+  if not moveForward(allowDig) then
+    state.pendingMove = nil
+    saveState()
+    return false
+  end
+  if state.x ~= x or state.z ~= z then
+    state.pendingMove = nil
+    saveState()
+    printError("Turtle movement did not reach the expected layer cell.")
+    return false
+  end
+  state.positionStep = step
+  state.pendingMove = nil
+  saveState()
+  return true
+end
+
+local function inventoryFull()
+  for slot = 1, 16 do
+    if turtle.getItemCount(slot) == 0 then return false end
+  end
+  return true
+end
+
+local function fuelForSafeReturn(includeNextMove)
+  -- positionStep 0 is the first work cell, one move away from the service
+  -- corner. When another move follows, both that move and the longer return
+  -- route must be reserved.
+  local moves = state.positionStep + state.depth + 13
+  if includeNextMove then moves = moves + 2 end
+  return moves
+end
+
+local function fuelForResume()
+  local workDepth = state.layer - 1
+  -- Reach the saved cell and retain enough fuel to follow the same clear path
+  -- back to the service corner after a useful chunk of layer work. This avoids
+  -- a wasteful service trip after only a handful of cells.
+  local total = state.width * state.length
+  local workChunk = math.min(256, math.max(0, total - state.nextCell))
+  return math.max(64, (workDepth + state.nextCell + workChunk + 1) * 2 + 24)
+end
+
+local function serviceChest(requiredFuel)
+  dashboard("Unloading into service chests...")
+  -- The return path may leave the turtle facing back toward the quarry. The
+  -- chest layout is defined relative to its original facing, so restore that
+  -- direction before using the left/right output chests.
+  if not face(0) then return false end
+  local hasFuelChest, fuelChestDetail = turtle.inspectUp()
+  if not hasFuelChest or not isStorageBlock(fuelChestDetail) then
+    printError("Fuel chest above the turtle is missing or is not storage.")
+    return false
+  end
   state.stats.services = state.stats.services + 1
   saveState()
   for slot = 1, 16 do
@@ -425,123 +686,261 @@ local function serviceChest()
     if turtle.getItemCount(slot) > 0 then
       local detail = turtle.getItemDetail(slot)
       local name = detail and detail.name or ""
-      local valuable = name:find("ore") or name:find("raw_") or name:find("diamond") or name:find("emerald") or name:find("lapis") or name:find("redstone") or name:find("quartz") or name:find("ancient_debris")
-      if valuable then turnRight(); turnRight(); turnRight() else turnRight() end
-      local dropped = turtle.drop()
-      if valuable then turnRight() else turnRight(); turnRight(); turnRight() end
-      if not dropped then
-        printError("Output chest is full. Empty it and restart the quarry.")
+      local valuable = name:find("ore") or name:find("raw_") or name:find("diamond")
+        or name:find("emerald") or name:find("lapis") or name:find("redstone")
+        or name:find("quartz") or name:find("ancient_debris")
+      local turnsToChest = valuable and 3 or 1
+      local turnsBack = valuable and 1 or 3
+      for _ = 1, turnsToChest do
+        if not turnRight() then return false end
+      end
+      local hasOutputChest, outputChestDetail = turtle.inspect()
+      if not hasOutputChest or not isStorageBlock(outputChestDetail) then
+        for _ = 1, turnsBack do turnRight() end
+        printError("Output chest is missing or is not storage. Nothing was dropped.")
         return false
+      end
+      while turtle.getItemCount(slot) > 0 do
+        local stillStorage, currentOutputDetail = turtle.inspect()
+        if not stillStorage or not isStorageBlock(currentOutputDetail) then
+          for _ = 1, turnsBack do turnRight() end
+          printError("Output chest disappeared. Nothing else was dropped.")
+          return false
+        end
+        local before = turtle.getItemCount(slot)
+        local dropped = turtle.drop()
+        if not dropped or turtle.getItemCount(slot) >= before then
+          for _ = 1, turnsBack do turnRight() end
+          printError("Output chest is full. Empty it and restart the quarry.")
+          return false
+        end
+      end
+      for _ = 1, turnsBack do
+        if not turnRight() then return false end
       end
     end
   end
-  local depthBudget = state.maximum == 0 and 1024 or state.maximum * 2 + 80
+
+  requiredFuel = requiredFuel or 0
+  if requiredFuel > fuelCapacity() then
+    printError("This resume needs " .. requiredFuel .. " fuel, above this turtle's capacity.")
+    print("Use a smaller quarry plan or start a new quarry.")
+    return false
+  end
   local attempts = 0
-  while fuelLevel() < depthBudget and attempts < 256 do
+  while fuelLevel() < requiredFuel and attempts < 1024 do
     turtle.select(16)
     if not turtle.suckUp(1) then break end
-    if turtle.refuel(0) then turtle.refuel(1) else turtle.dropUp() end
+    if turtle.refuel(0) then
+      turtle.refuel(1)
+    else
+      turtle.dropUp()
+      break
+    end
     attempts = attempts + 1
   end
-  if fuelLevel() < depthBudget then
-    printError("Add more fuel to the service chest, then restart the quarry.")
+  if fuelLevel() < requiredFuel then
+    printError("Add more usable fuel to the top fuel chest, then restart the quarry.")
+    print("Need " .. requiredFuel .. ", have " .. fuelLevel() .. ".")
     return false
   end
   return true
 end
 
-local function goHomeAndService()
-  returnToSurface()
-  moveTo(0, 0)
-  return serviceChest()
-end
-
-local function mineColumn()
-  state.phase = "mining"
+local function returnToBase()
+  state.phase = "returning"
   saveState()
-  while state.current < state.mined do moveDown() end
-  while state.maximum == 0 or state.mined < state.maximum do
-    if fuelLevel() < (state.current + 20) * 2 then
-      state.phase = "returning"
-      saveState()
-      return false
-    end
-    if turtle.down() then
-      state.current = state.current + 1
-      state.mined = state.current
-      saveState()
-      dashboard("Mining column...")
-    elseif turtle.detectDown() and turtle.digDown() then
-      state.stats.blocks = state.stats.blocks + 1
-      -- Step into the mined block on the next iteration.
-    else
-      return true
-    end
+  dashboard("Returning to service chests...")
+  while state.positionStep > 0 do
+    if not moveToRouteStep(state.positionStep - 1) then return false end
   end
+  while state.depth > 0 do
+    if not moveUp(false) then return false end
+  end
+  if state.positionStep == 0 then
+    if not moveToRouteStep(-1) then return false end
+  end
+  state.phase = "surface"
+  saveState()
   return true
 end
 
-local function advanceColumn()
-  state.mined = 0
-  state.current = 0
-  state.targetX = state.targetX + 1
-  if state.targetX >= state.width then
-    state.targetX = 0
-    state.targetZ = state.targetZ + 1
-  end
-  state.phase = "ready"
+local function prepareWorkingPosition()
+  local targetDepth = state.layer - 1
+  -- Walk from the protected service corner to the first work cell. This cell
+  -- is the vertical access shaft for deeper layers.
+  state.phase = "replaying"
   saveState()
-end
+  if state.positionStep < 0 then
+    if not moveToRouteStep(0) then return false end
+  end
 
--- Recover from a restart during a return trip before deciding the next action.
-if state.phase == "returning" then
-  dashboard("Resuming return to service chest...")
-  if not goHomeAndService() then return end
-  state.phase = "ready"
+  state.phase = "descending"
   saveState()
+  while state.depth < targetDepth do
+    if not moveDown(false) then return false end
+  end
+  if state.depth ~= targetDepth then
+    printError("Turtle depth is deeper than the saved layer.")
+    return false
+  end
+
+  state.phase = "replaying"
+  saveState()
+  while state.positionStep < state.nextCell do
+    if not moveToRouteStep(state.positionStep + 1) then return false end
+  end
+  if state.positionStep ~= state.nextCell then
+    printError("Turtle cannot reach the saved layer progress safely.")
+    return false
+  end
+  state.phase = "mining"
+  saveState()
+  return true
 end
 
-while state.targetZ < state.length do
-  dashboard("Travelling to next column...")
-  if state.current > 0 then
-    -- A restart while mining: continue exactly at the recorded depth.
-    local finished = mineColumn()
-    if not finished then
-      if not goHomeAndService() then return end
-    else
-      returnToSurface()
-      if not goHomeAndService() then return end
-      advanceColumn()
+local function isBedrock(detail)
+  local name = detail and detail.name or ""
+  return name == "minecraft:bedrock"
+end
+
+local function mineCurrentCell()
+  local hasBlock, detail = turtle.inspectDown()
+  if not hasBlock then return true end
+  if isBedrock(detail) then
+    state.bedrockFound = true
+    return true
+  end
+  local dug, reason = turtle.digDown()
+  if dug then
+    state.stats.blocks = state.stats.blocks + 1
+    return true
+  end
+  printError("Cannot mine below at " .. (detail.name or "unknown block") .. ".")
+  print(reason or "Check the turtle tool and claim/protection settings.")
+  return false
+end
+
+local function mineLayer()
+  local total = state.width * state.length
+  -- A restart may happen after a cell was mined and saved, but just before the
+  -- turtle moved to the next cell. That path is already clear, so restore the
+  -- expected position instead of treating the job as corrupt.
+  if state.nextCell >= total then
+    state.layerComplete = true
+    state.phase = "layer_complete"
+    saveState()
+    return true, "complete"
+  end
+  if state.positionStep < state.nextCell then
+    state.phase = "replaying"
+    saveState()
+    while state.positionStep < state.nextCell do
+      if not moveToRouteStep(state.positionStep + 1) then return false, "blocked" end
     end
-  else
-    if state.x ~= 0 or state.z ~= 0 then moveTo(0, 0) end
-    if not serviceChest() then return end
-    moveTo(state.targetX, state.targetZ)
-    local finished = mineColumn()
-    if not finished then
-      if not goHomeAndService() then return end
-    else
-      returnToSurface()
-      if not goHomeAndService() then return end
-      advanceColumn()
+    state.phase = "mining"
+    saveState()
+  elseif state.positionStep > state.nextCell then
+    printError("Layer position is ahead of the saved progress.")
+    return false, "blocked"
+  end
+
+  while state.nextCell < total do
+    if state.positionStep ~= state.nextCell then
+      printError("Layer position and saved progress do not match.")
+      return false, "blocked"
+    end
+    if inventoryFull() then
+      dashboard("Inventory full - returning to service chests...")
+      return false, "service"
+    end
+    local hasNextMove = state.nextCell < total - 1
+    if fuelLevel() < fuelForSafeReturn(hasNextMove) then
+      dashboard("Fuel reserve reached - returning to service chests...")
+      return false, "service"
+    end
+
+    dashboard("Mining layer " .. state.layer .. "...")
+    if not mineCurrentCell() then return false, "blocked" end
+    state.nextCell = state.nextCell + 1
+    saveState()
+
+    if state.nextCell < total then
+      if not moveToRouteStep(state.nextCell) then return false, "blocked" end
     end
   end
+  state.layerComplete = true
+  state.phase = "layer_complete"
+  saveState()
+  return true, "complete"
 end
 
-term.setBackgroundColor(colors.black)
-term.clear()
-term.setCursorPos(1, 1)
-paint(colors.lime)
-print("Quarry complete. All columns were delivered to the service chest.")
-paint(colors.white)
-notify("Quarry complete: " .. state.stats.blocks .. " blocks mined")
-local statsHandle = fs.open("/quarryos/quarry-last-stats", "w")
-statsHandle.write(textutils.serialize(state.stats))
-statsHandle.close()
-local history = fs.open("/quarryos/quarry-history", "a")
-history.writeLine(textutils.serialize({
-  width = state.width, length = state.length, maximum = state.maximum,
-  blocks = state.stats.blocks, started = state.started, finished = os.epoch("utc"),
-}))
-history.close()
-fs.delete(stateFile)
+local function completeQuarry()
+  for slot = 1, 16 do
+    if turtle.getItemCount(slot) > 0 then
+      printError("Items remain in the turtle. The quarry state was kept safely.")
+      return false
+    end
+  end
+  term.setBackgroundColor(colors.black)
+  term.clear()
+  term.setCursorPos(1, 1)
+  paint(colors.lime)
+  print("Layer quarry complete. All items were delivered to the service chests.")
+  paint(colors.white)
+  notify("Layer quarry complete: " .. state.stats.blocks .. " blocks mined")
+  local statsHandle = fs.open("/quarryos/quarry-last-stats", "w")
+  statsHandle.write(textutils.serialize(state.stats))
+  statsHandle.close()
+  local history = fs.open("/quarryos/quarry-history", "a")
+  history.writeLine(textutils.serialize({
+    width = state.width, length = state.length, maximum = state.maximum,
+    blocks = state.stats.blocks, started = state.started, finished = os.epoch("utc"), layout = "layers",
+  }))
+  history.close()
+  fs.delete(stateFile)
+  if fs.exists(stateBackupFile) then fs.delete(stateBackupFile) end
+  return true
+end
+
+-- Recover safely from a restart in the middle of a return trip or a layer
+-- transition before deciding which work action is next.
+if state.phase == "returning" or state.phase == "layer_complete" then
+  if not returnToBase() then return end
+elseif state.phase ~= "surface" and state.phase ~= "mining" and state.phase ~= "descending" and state.phase ~= "replaying" then
+  printError("Unknown quarry phase: " .. tostring(state.phase))
+  return
+end
+
+while true do
+  if state.phase == "surface" then
+    if state.layerComplete then
+      if state.bedrockFound or (state.maximum > 0 and state.layer >= state.maximum) then
+        dashboard(state.bedrockFound and "Bedrock layer reached - final service..." or "Final service visit...")
+        if not serviceChest(0) then return end
+        if completeQuarry() then return end
+        return
+      end
+      state.layer = state.layer + 1
+      state.nextCell = 0
+      -- returnToBase leaves the turtle at the protected service corner
+      -- (route step -1). Keep that position so prepareWorkingPosition moves
+      -- it back to the first quarry cell before descending into the next layer.
+      state.positionStep = -1
+      state.layerComplete = false
+      state.bedrockFound = false
+      saveState()
+    end
+
+    if not serviceChest(fuelForResume()) then return end
+    if not prepareWorkingPosition() then return end
+  elseif state.phase == "descending" or state.phase == "replaying" then
+    if not prepareWorkingPosition() then return end
+  end
+
+  if state.phase == "mining" then
+    local _, result = mineLayer()
+    if result == "blocked" then return end
+    if not returnToBase() then return end
+  end
+end

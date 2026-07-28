@@ -16,8 +16,8 @@ computers, advanced computers, turtles and pocket computers.
 - Safe delegation of all other commands to the native ComputerCraft shell
 - A `status` command that reports the current computer, label and fuel level
 - Non-destructive installer which backs up an existing `startup` program
-- Turtle quarry program that mines a vertical shaft to bedrock, auto-refuels
-  from the turtle inventory and returns to its starting height
+- Turtle quarry program that clears full horizontal layers, auto-refuels from
+  its service chest and safely returns to its starting corner
 
 ## Requirements
 
@@ -49,25 +49,32 @@ After installation, reboot the computer or execute `startup`.
 ## Turtle quarry
 
 Place three service chests at the turtle's starting corner: fuel on top, ores
-and valuables on the left, and normal blocks on the right. A setup menu checks
+and valuables on the left, and normal blocks on the right. Point the turtle
+towards the quarry and leave the block directly in front of it free; that is the
+first quarry cell and the access shaft for deeper layers. A setup menu checks
 for the chests and asks for freely selectable width, length and depth (`0` means
 mine until bedrock):
 
 ```lua
-/quarryos/quarry.lua
+q
 ```
 
-It mines every column in the selected area. After each column it returns to the
-starting corner, sorts its items into the output chests, refuels and continues
-with the next column. Progress survives restarts. Use `stats` to view statistics
-for the last completed quarry.
+It clears every horizontal layer in a zig-zag path before descending to the
+next one. Between layers, and whenever the inventory is full or fuel reaches a
+safe return reserve, it returns to the starting corner, sorts its items into the
+output chests, refuels and continues. Progress survives restarts. In bedrock
+mode it finishes the complete first layer where bedrock is encountered, which
+keeps the quarry floor level and safe. Use `stats` to view statistics for the
+last completed quarry.
 
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
 previous jobs and `selftest` to check the complete setup.
 
-If Minecraft or the server restarts, run `/quarryos/quarry.lua` again on the
-same turtle. QuarryOS restores its saved depth and continues the current shaft.
+If Minecraft or the server restarts, run `q` again on the same turtle. QuarryOS
+checks its GPS position and continues at the saved layer and cell. To abandon a
+saved job and create a new plan at the service corner, run `q new`; the old
+progress is archived instead of deleted.
 
 ## In-game updates
 

@@ -23,9 +23,16 @@ Use a larger multi-block Advanced Monitor for the clearest display. If the
 base monitor server is offline, the quarry continues normally using the turtle
 display.
 
-QuarryOS automatically selects the largest text size that still fits the live
-dashboard. If you add or remove monitor blocks later, reboot the monitor
-computer so it can recalculate the scale.
+QuarryOS automatically selects a layout and the largest suitable text size. A
+1x2 monitor is physically narrow, so it normally uses a short dashboard at
+scale 0.5 instead of cutting off long lines. A correctly connected 3x3 or 5x5
+monitor has more room and therefore receives a larger scale automatically. The
+server also recalculates after a monitor is resized; its computer console prints
+the detected layout, scale and character size for troubleshooting.
+
+For a multi-block monitor, place all monitor blocks as one continuous
+rectangle with the same facing and orientation. Otherwise CC:Tweaked treats
+the pieces as separate monitors.
 
 ## If the screen stays on "Waiting for Turtle signal"
 
