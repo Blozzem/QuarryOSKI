@@ -890,6 +890,14 @@ local function isSealBlock(detail)
   return false
 end
 
+-- Mined coal is useful fuel, not ordinary quarry waste. Send coal and modded
+-- coal variants to the top fuel chest, where the normal refuelling pass can
+-- immediately use it if the Turtle needs it.
+local function isFuelOutputItem(detail)
+  local name = detail and detail.name or ""
+  return name:find("coal", 1, true) ~= nil
+end
+
 -- Slot 16 is deliberately reserved for the Liquid Guard. Keeping the reserve
 -- in one predictable place means the Turtle can explain exactly what is
 -- missing instead of travelling into the quarry and immediately returning.
@@ -949,29 +957,41 @@ local function serviceChest(requiredFuel)
         reservedSealSlot = slot
       else
       local name = detail and detail.name or ""
+      local fuelItem = isFuelOutputItem(detail)
       local valuable = name:find("ore") or name:find("raw_") or name:find("diamond")
         or name:find("emerald") or name:find("lapis") or name:find("redstone")
         or name:find("quartz") or name:find("ancient_debris")
       local chestDirection = valuable and 3 or 1
-      if not face(chestDirection) then return false end
-      local hasOutputChest, outputChestDetail = turtle.inspect()
+      if not fuelItem and not face(chestDirection) then return false end
+      local hasOutputChest, outputChestDetail
+      if fuelItem then
+        hasOutputChest, outputChestDetail = turtle.inspectUp()
+      else
+        hasOutputChest, outputChestDetail = turtle.inspect()
+      end
       if not hasOutputChest or not isStorageBlock(outputChestDetail) then
         face(0)
-        printError("Output chest is missing or is not storage. Nothing was dropped.")
+        printError((fuelItem and "Fuel" or "Output") .. " chest is missing or is not storage. Nothing was dropped.")
         return false
       end
       while turtle.getItemCount(slot) > 0 do
-        local stillStorage, currentOutputDetail = turtle.inspect()
+        local stillStorage, currentOutputDetail
+        if fuelItem then
+          stillStorage, currentOutputDetail = turtle.inspectUp()
+        else
+          stillStorage, currentOutputDetail = turtle.inspect()
+        end
         if not stillStorage or not isStorageBlock(currentOutputDetail) then
           face(0)
-          printError("Output chest disappeared. Nothing else was dropped.")
+          printError((fuelItem and "Fuel" or "Output") .. " chest disappeared. Nothing else was dropped.")
           return false
         end
         local before = turtle.getItemCount(slot)
-        local dropped = turtle.drop()
+        local dropped
+        if fuelItem then dropped = turtle.dropUp() else dropped = turtle.drop() end
         if not dropped or turtle.getItemCount(slot) >= before then
           face(0)
-          printError("Output chest is full. Empty it and restart the quarry.")
+          printError((fuelItem and "Fuel" or "Output") .. " chest is full. Empty it and restart the quarry.")
           return false
         end
       end

@@ -61,6 +61,9 @@ mine until bedrock):
 q
 ```
 
+Mined Coal (including modded Coal variants) is returned to the top fuel chest,
+not the normal-block chest, so it can be used for later refuelling.
+
 It clears every horizontal layer in a zig-zag path before descending directly
 into the next one and reversing the path. It returns to the starting corner only
 when the inventory is full, fuel reaches a safe return reserve, at the final
