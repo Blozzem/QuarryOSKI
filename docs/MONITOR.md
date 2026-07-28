@@ -23,6 +23,10 @@ Use a larger multi-block Advanced Monitor for the clearest display. If the
 base monitor server is offline, the quarry continues normally using the turtle
 display.
 
+QuarryOS automatically selects the largest text size that still fits the live
+dashboard. If you add or remove monitor blocks later, reboot the monitor
+computer so it can recalculate the scale.
+
 ## If the screen stays on "Waiting for Turtle signal"
 
 Update and reboot **both** the Turtle and the monitor computer. The Turtle

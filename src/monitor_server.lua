@@ -3,6 +3,22 @@
 local monitor = peripheral.find("monitor")
 if not monitor then error("Attach an Advanced Monitor to this computer.", 0) end
 
+-- Use the largest readable font which still leaves room for the complete
+-- quarry dashboard. This means a single monitor remains legible, while a
+-- larger multi-block monitor automatically uses larger text.
+local function configureTextScale()
+  if not monitor.setTextScale then return end
+  for scale = 5, 0.5, -0.5 do
+    monitor.setTextScale(scale)
+    local width, height = monitor.getSize()
+    if width >= 40 and height >= 11 then return scale end
+  end
+  monitor.setTextScale(0.5)
+  return 0.5
+end
+
+local textScale = configureTextScale()
+
 local hasWirelessModem = false
 for _, side in ipairs(peripheral.getNames()) do
   if peripheral.getType(side) == "modem" and peripheral.call(side, "isWireless") then
@@ -13,7 +29,6 @@ end
 if not hasWirelessModem then error("Attach an Ender or Wireless Modem to this computer.", 0) end
 
 local function draw(data)
-  if monitor.setTextScale then monitor.setTextScale(0.5) end
   monitor.setBackgroundColor(colors.black)
   monitor.clear()
   monitor.setCursorPos(1, 1)
@@ -42,7 +57,6 @@ local function draw(data)
 end
 
 local function drawWaiting()
-  if monitor.setTextScale then monitor.setTextScale(0.5) end
   monitor.setBackgroundColor(colors.black)
   monitor.clear()
   monitor.setCursorPos(1, 1)
@@ -59,7 +73,7 @@ local function drawWaiting()
 end
 
 drawWaiting()
-print("QuarryOS monitor server ready.")
+print("QuarryOS monitor server ready" .. (textScale and " (text scale " .. textScale .. ")" or "."))
 while true do
   local _, message, protocol = rednet.receive()
   if protocol == "quarryos-monitor" then
