@@ -1146,24 +1146,22 @@ local function placeFluidSeal()
   return false
 end
 
--- A flowing liquid is sometimes reported as an empty field by the Turtle.
--- First inspect normally: when Lava/Water is already visible, never place a
--- test block into it. Only an apparently empty field gets the temporary-block
--- refresh needed to make certain flowing liquids visible.
+-- When Lava is visible below, briefly place and mine a normal block in that
+-- field. This refreshes the liquid field before the next-layer wall check.
+-- Nothing is placed into air or water.
 local function probeOpenFloor()
   local _, beforeDetail = turtle.inspectDown()
   local visibleFluid = fluidKind(beforeDetail)
-  if visibleFluid then return true, visibleFluid end
+  if visibleFluid ~= "lava" then return true, visibleFluid end
 
   local selected = turtle.getSelectedSlot()
   for slot = 1, 16 do
     if turtle.getItemCount(slot) > 0 and isSealBlock(turtle.getItemDetail(slot)) then
       turtle.select(slot)
       if turtle.placeDown() then
-        local removed = turtle.digDown()
-        local _, detail = turtle.inspectDown()
+        turtle.digDown()
         turtle.select(selected)
-        return removed, fluidKind(detail)
+        return true, "lava"
       end
     end
   end
