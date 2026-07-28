@@ -98,11 +98,14 @@ if state then
     state.layerProgress = totalCells
     state.nextCell = totalCells - 1
   end
-  state.version = math.max(4, state.version or 1)
+  state.version = math.max(5, state.version or 1)
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
   state.stopAfterLayerRequested = state.stopAfterLayerRequested or false
+  -- Emergency auto-return is enabled by default. The monitor can turn it off
+  -- deliberately, but a detected problem always remains saved and visible.
+  state.emergencyMode = state.emergencyMode ~= false
   state.fluidChecks = state.fluidChecks or {}
   state.stats.fluids = state.stats.fluids or 0
   state.stats.seals = state.stats.seals or 0
@@ -275,12 +278,15 @@ local function broadcastMonitor(message)
     columnX = math.max(0, state.x - 1), columnZ = state.z,
     current = state.depth, mined = state.layer,
     layer = state.layer, nextCell = state.nextCell, totalCells = total,
-    positionStep = state.positionStep + 1, progressStep = total,
-    layerProgress = state.layerProgress,
+    positionStep = state.positionStep, progressStep = total,
+    layerProgress = state.layerProgress, routeDirection = state.routeDirection,
     progressPercent = percentage, progressEstimated = approximate,
     estimatedRemainingMs = eta, completedCells = completed, plannedCells = planned,
     fuelRequired = requiredFuel, fuelShortfall = math.max(0, requiredFuel - fuelLevel()),
     stopAfterLayerRequested = state.stopAfterLayerRequested,
+    emergencyMode = state.emergencyMode,
+    emergencyMessage = state.emergency and state.emergency.message or nil,
+    emergencyAt = state.emergency and state.emergency.at or nil,
     fuel = fuelLevel(), blocks = state.stats.blocks, fluids = state.stats.fluids,
     seals = state.stats.seals, message = message,
   }
@@ -534,6 +540,7 @@ local function setupMenu()
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
     layerComplete = false, bedrockFound = false, phase = "surface", fluidChecks = {},
+    emergencyMode = true,
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
     started = os.epoch("utc"), plan = choice,
@@ -599,6 +606,16 @@ local function verifySavedPosition()
   return true
 end
 
+local function markStartupEmergency(reason)
+  state.emergency = {
+    message = reason, at = os.epoch("utc"),
+    layer = state.layer, x = state.x, z = state.z, depth = state.depth,
+  }
+  state.phase = "emergency"
+  saveState()
+  notify("EMERGENCY: " .. reason, "error")
+end
+
 local resumePausedQuarry = state and state.phase == "paused"
 if not state then
   state = setupMenu()
@@ -611,12 +628,21 @@ elseif (state.phase == "surface" or resumePausedQuarry) and not preflightCheck(t
   return
 end
 
-if not resolvePendingMove() then return end
-if not verifySavedPosition() then return end
+if not resolvePendingMove() then
+  markStartupEmergency("GPS could not recover an interrupted movement.")
+  return
+end
+if not verifySavedPosition() then
+  markStartupEmergency("GPS position check failed. Turtle stopped safely.")
+  return
+end
 if resumePausedQuarry then
   state.phase = "surface"
   state.pauseRequested = nil
   state.pauseRequestId = nil
+  -- Running q from a deliberately paused service station acknowledges any
+  -- previous emergency after the player has inspected/fixed the problem.
+  state.emergency = nil
   saveState()
   print("Resuming the quarry from the service station...")
 end
@@ -1426,42 +1452,109 @@ local function pauseAtServiceStation()
   return false
 end
 
+-- A blocked movement, failed replay or similar unexpected condition must not
+-- leave the job looking normal. Record the reason first, then make one safe
+-- non-digging attempt to reach the service station. If that path is blocked
+-- too, the Turtle stays exactly where it is with the emergency saved.
+local function enterEmergency(reason)
+  reason = reason or "QuarryOS could not continue safely."
+  state.emergency = {
+    message = reason, at = os.epoch("utc"),
+    layer = state.layer, x = state.x, z = state.z, depth = state.depth,
+  }
+  state.phase = "emergency"
+  saveState()
+  notify("EMERGENCY: " .. reason, "error")
+
+  if atServiceStation() then
+    -- Do not retry an already failing chest operation. Keep the Turtle at the
+    -- station and let the player correct fuel, storage or the Liquid Guard.
+    state.phase = "paused"
+    state.pauseRequested = nil
+    state.pauseRequestId = nil
+    saveState()
+    dashboard("EMERGENCY at service station: " .. reason .. " Fix it, then run q.")
+    return true
+  end
+
+  if not state.emergencyMode then
+    dashboard("EMERGENCY STOP: " .. reason .. " Auto-return is OFF.")
+    return false
+  end
+
+  dashboard("EMERGENCY: returning safely to service station...")
+  if returnToBase() then
+    pauseAtServiceStation()
+    return true
+  end
+
+  state.phase = "emergency"
+  saveState()
+  dashboard("EMERGENCY STOP: " .. reason .. " Clear the path, then run q.")
+  return false
+end
+
 local function handleCompletedLayer()
   local reason = serviceReasonAtLayerBoundary()
   if finalLayerReached() then
     -- A manual pause wins over automatic completion, so the user can inspect
     -- the last layer before choosing to resume and finish the job.
     if reason == "pause" then
-      if not atServiceStation() and not returnToBase() then return false end
+      if not atServiceStation() and not returnToBase() then
+        enterEmergency("The Turtle could not return to the service station.")
+        return false
+      end
       return pauseAtServiceStation()
     end
-    if not atServiceStation() and not returnToBase() then return false end
+    if not atServiceStation() and not returnToBase() then
+      enterEmergency("The Turtle could not return to the service station.")
+      return false
+    end
     if state.pauseRequested or state.stopAfterLayerRequested then return pauseAtServiceStation() end
     dashboard(state.bedrockFound and "Bedrock layer reached - final service..." or "Final service visit...")
-    if not serviceChest(0) then return false end
+    if not serviceChest(0) then
+      enterEmergency("The service station needs attention (fuel, storage or Liquid Guard).")
+      return false
+    end
     if state.pauseRequested or state.stopAfterLayerRequested then return pauseAtServiceStation() end
     completeQuarry()
     return false
   end
 
   if reason then
-    if not atServiceStation() and not returnToBase() then return false end
+    if not atServiceStation() and not returnToBase() then
+      enterEmergency("The Turtle could not return to the service station.")
+      return false
+    end
     if reason == "pause" then return pauseAtServiceStation() end
     dashboard("Layer complete - service needed before continuing...")
-    if not serviceChest(fuelForResume()) then return false end
+    if not serviceChest(fuelForResume()) then
+      enterEmergency("The service station needs attention (fuel, storage or Liquid Guard).")
+      return false
+    end
     if state.pauseRequested then return pauseAtServiceStation() end
   end
 
   if state.pauseRequested or state.stopAfterLayerRequested then
-    if not atServiceStation() and not returnToBase() then return false end
+    if not atServiceStation() and not returnToBase() then
+      enterEmergency("The Turtle could not return to the service station.")
+      return false
+    end
     return pauseAtServiceStation()
   end
   local started, startReason = beginNextLayer()
-  if not started and startReason == "pause" then
-    if not atServiceStation() and not returnToBase() then return false end
-    return pauseAtServiceStation()
+  if not started then
+    if startReason == "pause" then
+      if not atServiceStation() and not returnToBase() then
+        enterEmergency("The Turtle could not return to the service station.")
+        return false
+      end
+      return pauseAtServiceStation()
+    end
+    enterEmergency("The next layer could not be started safely.")
+    return false
   end
-  return started
+  return true
 end
 
 local function decodeControl(message)
@@ -1521,6 +1614,19 @@ local function controlListener()
           fuel = fuelLevel(), requiredFuel = required,
           fuelShortfall = math.max(0, required - fuelLevel()),
         })
+      elseif command.command == "emergency_toggle" then
+        -- The monitor sends the desired value. This makes a retry with the
+        -- same request safe when the original acknowledgement was lost.
+        if type(command.emergencyMode) ~= "boolean" then
+          -- Do not treat an old blind-toggle request as safe: retries of it
+          -- could enable and disable auto-return twice.
+          acknowledgeControl(sender, command, "rejected", { emergencyMode = state.emergencyMode })
+        else
+          state.emergencyMode = command.emergencyMode
+          saveState()
+          acknowledgeControl(sender, command, "updated", { emergencyMode = state.emergencyMode })
+          notify("Emergency auto-return " .. (state.emergencyMode and "enabled" or "disabled") .. " from the monitor.", "warning")
+        end
       end
     end
   end
@@ -1529,12 +1635,35 @@ end
 local function runQuarry()
   -- Recover safely from a restart in the middle of a return trip or a layer
   -- transition before deciding which work action is next.
-  if state.phase == "returning" then
-    if not returnToBase() then return end
+  if state.phase == "emergency" then
+    local reason = state.emergency and state.emergency.message or "Saved emergency state."
+    if atServiceStation() then
+      pauseAtServiceStation()
+    elseif not state.emergencyMode then
+      dashboard("EMERGENCY STOP: " .. reason .. " Auto-return is OFF.")
+      return
+    elseif returnToBase() then
+      pauseAtServiceStation()
+    else
+      state.phase = "emergency"
+      saveState()
+      dashboard("EMERGENCY STOP: " .. reason .. " Clear the path, then run q.")
+    end
+    return
+  elseif state.phase == "returning" then
+    if not returnToBase() then
+      enterEmergency("The saved return route is blocked.")
+      return
+    end
   elseif state.phase == "transitioning" then
     local started, startReason = beginNextLayer()
     if not started then
-      if startReason == "pause" and returnToBase() then pauseAtServiceStation() end
+      if startReason == "pause" then
+        if returnToBase() then pauseAtServiceStation()
+        else enterEmergency("The Turtle could not return to the service station.") end
+      else
+        enterEmergency("The next layer could not be started safely.")
+      end
       return
     end
   elseif state.phase ~= "surface" and state.phase ~= "mining" and state.phase ~= "descending"
@@ -1551,14 +1680,22 @@ local function runQuarry()
       elseif state.layerComplete then
         if not handleCompletedLayer() then return end
       else
-        if not serviceChest(fuelForResume()) then return end
+        if not serviceChest(fuelForResume()) then
+          enterEmergency("The service station needs attention (fuel, storage or Liquid Guard).")
+          return
+        end
         if state.pauseRequested then
           pauseAtServiceStation()
           return
         end
         local prepared, prepareReason = prepareWorkingPosition()
         if not prepared then
-          if prepareReason == "pause" and returnToBase() then pauseAtServiceStation() end
+          if prepareReason == "pause" then
+            if returnToBase() then pauseAtServiceStation()
+            else enterEmergency("The Turtle could not return to the service station.") end
+          else
+            enterEmergency("The Turtle could not reach its saved work position.")
+          end
           return
         end
       end
@@ -1567,20 +1704,35 @@ local function runQuarry()
     elseif state.phase == "descending" or state.phase == "replaying" then
       local prepared, prepareReason = prepareWorkingPosition()
       if not prepared then
-        if prepareReason == "pause" and returnToBase() then pauseAtServiceStation() end
+        if prepareReason == "pause" then
+          if returnToBase() then pauseAtServiceStation()
+          else enterEmergency("The Turtle could not return to the service station.") end
+        else
+          enterEmergency("The Turtle could not reach its saved work position.")
+        end
         return
       end
     end
 
     if state.phase == "mining" then
       local _, result = mineLayer()
-      if result == "blocked" then return end
+      if result == "blocked" then
+        enterEmergency("A movement or block could not be cleared safely.")
+        return
+      end
       if result == "fluid" then
-        if returnToBase() then pauseAtServiceStation() end
+        if returnToBase() then
+          pauseAtServiceStation()
+        else
+          enterEmergency("The Turtle could not return after the Liquid Guard paused work.")
+        end
         return
       end
       if result == "pause" or result == "service" then
-        if not returnToBase() then return end
+        if not returnToBase() then
+          enterEmergency("The Turtle could not return to the service station.")
+          return
+        end
         if state.pauseRequested then
           pauseAtServiceStation()
           return

@@ -46,7 +46,7 @@ One monitor can track several QuarryOS Turtles at once. Touch a Turtle in the
 Turtle, never to all of them. Give Turtles names with CC:Tweaked's normal
 `label` command to make the list easier to read.
 
-On a compact monitor, touch the blue title bar to return to the Turtle list.
+On a compact monitor, touch the title bar to return to the Turtle list.
 The selected Turtle has these buttons:
 
 - **SVC**: return to the service station, unload, refuel and pause.
@@ -55,10 +55,18 @@ The selected Turtle has these buttons:
 - **FUEL**: ask the Turtle for its current fuel, safe fuel requirement and any
   shortfall. This checks the Turtle's fuel; it does not remove fuel from the
   chest.
-- **LIST**: choose another Turtle.
+- **title bar**: return to the Turtle list and choose another Turtle.
 - **ALARMS**: show the last 20 QuarryOS notifications.
+- **MAP**: show a top-down, scaled view of the selected Turtle's current
+  layer. Completed cells, the current Turtle position and the unmined area are
+  shown with different colours.
+- **SETTINGS**: open monitor options. It can mute/unmute the local Speaker and
+  enable or disable automatic emergency return for the selected, currently
+  running Turtle.
+- **UPDATE**: update and reboot this monitor computer only. It never updates,
+  pauses or reboots a Turtle.
 
-On a narrow 1x2 monitor, touch the title to cycle through the five buttons,
+On a narrow 1x2 monitor, touch the title to cycle through the available buttons,
 then touch the large bottom button. This keeps every control usable on a small
 screen.
 
@@ -68,6 +76,12 @@ The monitor records start, service-pause, stop-after-layer and completion
 messages. Warnings and completions are also played through an attached
 CC:Tweaked Speaker when one is available. A Turtle which has not sent a status
 message for 30 seconds is displayed as **OFF** in the Turtle list.
+
+The Settings screen's sound switch affects this monitor computer only. It does
+not silence other monitors or change the Turtle. Emergency auto-return is on by
+default: an unexpected blocked route is recorded and the Turtle tries to return
+without digging; if the return route is blocked too, it stops in place and
+reports the reason.
 
 ## Service and pause from the monitor
 

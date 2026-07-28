@@ -17,6 +17,8 @@ local alerts = {}
 local requestNumber = 0
 local pending = nil
 local controlNotice = nil
+local warningSoundEnabled = true
+local SETTINGS_PATH = "/quarryos/monitor-settings"
 
 -- A flat, low-noise operations overlay. Advanced Monitors have a character
 -- grid rather than true pixels, so avoiding large coloured rectangles makes
@@ -28,10 +30,31 @@ local THEME = {
   warning = colors.orange, danger = colors.red, alert = colors.purple,
 }
 
--- A 26-character threshold selects scale 1.0 on a normal 3x3 monitor and
+-- A 27-character threshold selects scale 1.0 on a normal 3x3 monitor and
 -- scale 1.5 on a normal 5x5 monitor. Narrow monitors use the tiny layout.
-local COMPACT_WIDTH, COMPACT_HEIGHT = 26, 10
+local COMPACT_WIDTH, COMPACT_HEIGHT = 27, 10
 local TINY_WIDTH, TINY_HEIGHT = 14, 10
+
+-- These are deliberately local monitor settings. Updating/rebooting this
+-- computer must never alter a turtle's warning or safety configuration.
+local function loadMonitorSettings()
+  if not fs.exists(SETTINGS_PATH) then return end
+  local file = fs.open(SETTINGS_PATH, "r")
+  if not file then return end
+  local saved = textutils.unserialize(file.readAll())
+  file.close()
+  if type(saved) == "table" and type(saved.warningSoundEnabled) == "boolean" then
+    warningSoundEnabled = saved.warningSoundEnabled
+  end
+end
+
+local function saveMonitorSettings()
+  local file = fs.open(SETTINGS_PATH, "w")
+  if not file then return false end
+  file.write(textutils.serialize({ warningSoundEnabled = warningSoundEnabled }))
+  file.close()
+  return true
+end
 
 local function now()
   return os.epoch and os.epoch("utc") or math.floor(os.clock() * 1000)
@@ -206,6 +229,7 @@ local function progressBar(data, width)
 end
 
 local function statusColour(data)
+  if data.emergencyMessage and data.emergencyMessage ~= "" then return THEME.danger end
   if tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 then return THEME.danger end
   if data.stopAfterLayerRequested or data.phase == "paused" then return THEME.warning end
   return THEME.muted
@@ -244,7 +268,9 @@ local function addAlert(sender, payload)
   }
   table.insert(alerts, 1, item)
   while #alerts > 20 do table.remove(alerts) end
-  if speaker and item.level ~= "info" then pcall(speaker.playSound, "block.note_block.pling", 1, 1) end
+  if speaker and warningSoundEnabled and item.level ~= "info" then
+    pcall(speaker.playSound, "block.note_block.pling", 1, 1)
+  end
   print("Quarry alert [" .. item.level .. "] " .. item.name .. ": " .. item.message)
 end
 
@@ -267,7 +293,9 @@ local function fuelText(data, short)
 end
 
 local function statusText(data)
-  return controlNotice or textOf(data.message, "Working...")
+  if controlNotice then return controlNotice end
+  if data.emergencyMessage and data.emergencyMessage ~= "" then return data.emergencyMessage end
+  return textOf(data.message, "Working...")
 end
 
 local function drawDetailCompact(entry)
@@ -282,10 +310,12 @@ local function drawDetailCompact(entry)
     tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and THEME.danger or THEME.safe, THEME.panel)
   fillRect(1, 8, screenWidth, 1, THEME.panel)
   writeOn(2, 8, statusText(data), statusColour(data), THEME.panel)
+  -- These five contiguous controls still fit on the smallest compact view.
   drawButton(1, 9, 5, "SVC", THEME.danger, "service_pause")
-  drawButton(7, 9, 6, "STOP", THEME.warning, "stop_after_layer")
-  drawButton(14, 9, 6, "FUEL", THEME.accent, "fuel_check")
-  drawButton(21, 9, 6, "LIST", THEME.muted, "overview")
+  drawButton(6, 9, 6, "STOP", THEME.warning, "stop_after_layer")
+  drawButton(12, 9, 6, "FUEL", THEME.accent, "fuel_check")
+  drawButton(18, 9, 5, "MAP", THEME.safe, "map")
+  drawButton(23, 9, 5, "SET", THEME.muted, "settings")
   local alarmWidth = math.max(10, math.floor((screenWidth - 1) / 2))
   drawButton(1, 10, alarmWidth, "ALARMS " .. #alerts, THEME.alert, "alerts")
   drawButton(alarmWidth + 2, 10, screenWidth - alarmWidth - 1, "UPDATE", THEME.safe, "monitor_update")
@@ -293,7 +323,7 @@ end
 
 local function drawDetailTiny(entry)
   local data = entry.data
-  beginFrame("QOS // P" .. tinyPage)
+  beginFrame("QOS // " .. tinyPage .. "/8")
   addTarget(1, 1, screenWidth, 1, "tiny_next")
   writeAt(1, 3, clip(turtleName(selectedTurtleId, entry), screenWidth), THEME.text)
   writeAt(1, 4, "[" .. progressBar(data, 7) .. "] " .. progressText(data, true), THEME.accent)
@@ -309,6 +339,8 @@ local function drawDetailTiny(entry)
     { "TURTLES", THEME.muted, "overview" },
     { "ALARMS " .. #alerts, THEME.alert, "alerts" },
     { "UPDATE", THEME.safe, "monitor_update" },
+    { "MAP", THEME.safe, "map" },
+    { "SETTINGS", THEME.muted, "settings" },
   }
   local page = pages[tinyPage]
   drawCenteredButton(10, page[1], page[2], page[3])
@@ -357,6 +389,148 @@ local function drawAlerts()
   drawCenteredButton(10, "BACK", THEME.muted, "overview")
 end
 
+-- The turtles send a little route metadata with each heartbeat. The map is a
+-- compact visualisation of that current layer, not a block-perfect scanner:
+-- on a 64x64 quarry several world cells intentionally share one monitor cell.
+local function mapNumber(value)
+  local number = tonumber(value)
+  return number and math.floor(number) or nil
+end
+
+local function mapRouteStep(x, z, width)
+  local column = z % 2 == 0 and x or (width - x - 1)
+  return z * width + column
+end
+
+local function mapCellForStep(step, width, length)
+  if step < 0 or step >= width * length then return nil, nil end
+  local z = math.floor(step / width)
+  local column = step % width
+  local x = z % 2 == 0 and column or (width - column - 1)
+  return x, z
+end
+
+local function mapCurrentCell(data, width, length)
+  local step = mapNumber(data.positionStep)
+  -- -1 is the service station, which deliberately sits outside the quarry
+  -- map. Do not make the first quarry cell look occupied while servicing.
+  if step and step < 0 then return nil, nil end
+  local x, z = mapNumber(data.columnX), mapNumber(data.columnZ)
+  if x and z and x >= 0 and x < width and z >= 0 and z < length then return x, z end
+
+  -- positionStep is the raw route step. It is only a fallback for status
+  -- packets which do not yet include columnX/columnZ.
+  if step then return mapCellForStep(step, width, length) end
+  return nil, nil
+end
+
+local function mapProgress(data, total)
+  local progress = mapNumber(data.layerProgress)
+  if progress == nil then
+    local completed = mapNumber(data.completedCells)
+    progress = completed and completed % total or 0
+  end
+  return math.max(0, math.min(total, progress))
+end
+
+local function mapCellComplete(step, progress, total, direction)
+  if direction < 0 then return step >= total - progress end
+  return step < progress
+end
+
+local function drawMap(entry)
+  local data = entry.data or {}
+  beginFrame("QUARRYOS // MAP")
+  addTarget(1, 1, screenWidth, 1, "detail")
+
+  local width, length = mapNumber(data.width), mapNumber(data.length)
+  if not width or not length or width < 1 or length < 1 then
+    writeAt(1, 4, "Map data is waiting", THEME.warning)
+    writeAt(1, 5, "for a turtle update.", THEME.muted)
+    drawCenteredButton(screenHeight, "BACK", THEME.muted, "detail")
+    return
+  end
+
+  local total = width * length
+  local progress = mapProgress(data, total)
+  local direction = mapNumber(data.routeDirection) or 1
+  local currentX, currentZ = mapCurrentCell(data, width, length)
+  local layer = textOf(data.layer, "?")
+  local percentage = math.floor(progress * 100 / total)
+  writeAt(1, 3, "L" .. layer .. "  " .. width .. "x" .. length .. "  " .. percentage .. "%", THEME.muted)
+
+  -- Leave three lines for the legend, route hint and Back button. At least a
+  -- four-row map remains on a 10-line monitor, including in tiny mode.
+  local mapTop = 4
+  local mapBottom = math.max(mapTop, screenHeight - 3)
+  local displayWidth = math.max(1, math.min(width, screenWidth - 2))
+  local displayHeight = math.max(1, math.min(length, mapBottom - mapTop + 1))
+  local mapLeft = math.max(1, math.floor((screenWidth - displayWidth) / 2) + 1)
+
+  for displayZ = 0, displayHeight - 1 do
+    local firstZ = math.floor(displayZ * length / displayHeight)
+    local lastZ = math.ceil((displayZ + 1) * length / displayHeight) - 1
+    for displayX = 0, displayWidth - 1 do
+      local firstX = math.floor(displayX * width / displayWidth)
+      local lastX = math.ceil((displayX + 1) * width / displayWidth) - 1
+      local completed, cells, isCurrent = 0, 0, false
+      for z = firstZ, lastZ do
+        for x = firstX, lastX do
+          local step = mapRouteStep(x, z, width)
+          cells = cells + 1
+          if mapCellComplete(step, progress, total, direction) then completed = completed + 1 end
+          if x == currentX and z == currentZ then isCurrent = true end
+        end
+      end
+      local colour = THEME.background
+      if isCurrent then
+        colour = THEME.accent
+      elseif completed == cells and completed > 0 then
+        colour = colors.gray
+      elseif completed > 0 then
+        colour = colors.darkGray
+      end
+      fillRect(mapLeft + displayX, mapTop + displayZ, 1, 1, colour)
+    end
+  end
+
+  local legendY = screenHeight - 2
+  writeOn(1, legendY, " ", THEME.text, THEME.accent)
+  writeAt(3, legendY, "NOW", THEME.muted)
+  writeOn(8, legendY, " ", THEME.text, colors.gray)
+  writeAt(10, legendY, "DONE", THEME.muted)
+  local route = direction < 0 and "Route: reverse" or "Route: forward"
+  local step = mapNumber(data.positionStep)
+  if step then route = route .. "  " .. math.max(0, step) .. "/" .. total end
+  writeAt(1, screenHeight - 1, route, THEME.muted)
+  drawCenteredButton(screenHeight, "BACK", THEME.muted, "detail")
+end
+
+local function drawSettings(entry)
+  local data = entry and entry.data or nil
+  beginFrame("QUARRYOS // SETTINGS")
+  addTarget(1, 1, screenWidth, 1, data and "detail" or "overview")
+
+  writeAt(1, 3, "LOCAL WARNING SOUND", THEME.muted)
+  drawCenteredButton(4, warningSoundEnabled and "SOUND: ON" or "SOUND: OFF",
+    warningSoundEnabled and THEME.safe or THEME.warning, "toggle_warning_sound")
+
+  local emergencyOn = data and data.emergencyMode == true
+  writeAt(1, 5, data and "AUTOMATIC EMERGENCY RETURN" or "SELECT A TURTLE FOR CONTROL", THEME.muted)
+  drawCenteredButton(6, emergencyOn and "AUTO RETURN: ON" or "AUTO RETURN: OFF",
+    emergencyOn and THEME.safe or THEME.warning, "emergency_toggle")
+
+  if data and data.emergencyMessage then
+    writeAt(1, 7, data.emergencyMessage, THEME.danger)
+  elseif emergencyOn then
+    writeAt(1, 7, "Safe auto-return is enabled", THEME.safe)
+  else
+    writeAt(1, 7, "Speaker setting is monitor-only", THEME.muted)
+  end
+  writeAt(1, 8, controlNotice or "Tap emergency to change Turtle mode.", THEME.muted)
+  drawCenteredButton(screenHeight, "BACK", THEME.muted, data and "detail" or "overview")
+end
+
 local function render()
   touchTargets = {}
   if view == "alerts" then
@@ -364,7 +538,11 @@ local function render()
     return
   end
   local entry = selected()
-  if view == "detail" and entry then
+  if view == "map" and entry then
+    drawMap(entry)
+  elseif view == "settings" then
+    drawSettings(entry)
+  elseif view == "detail" and entry then
     if layout == "compact" then drawDetailCompact(entry) else drawDetailTiny(entry) end
   else
     view = "overview"
@@ -386,7 +564,13 @@ local function sendCommand(commandName)
     return
   end
   local requestId = nextRequestId()
-  local serialized = textutils.serialize({ command = commandName, jobId = entry.data.jobId, requestId = requestId })
+  local command = { command = commandName, jobId = entry.data.jobId, requestId = requestId }
+  -- Send the desired setting, rather than a blind "flip" request. Retries
+  -- keep the same value and are therefore safe even when an ACK was lost.
+  if commandName == "emergency_toggle" then
+    command.emergencyMode = not (entry.data.emergencyMode == true)
+  end
+  local serialized = textutils.serialize(command)
   local sent = rednet.send(selectedTurtleId, serialized, "quarryos-control")
   if sent then
     pending = { turtleId = selectedTurtleId, jobId = entry.data.jobId, requestId = requestId,
@@ -422,15 +606,34 @@ local function handleAction(action)
   if action == "overview" then
     view = "overview"
     controlNotice = nil
+  elseif action == "detail" then
+    view = selected() and "detail" or "overview"
+    controlNotice = nil
   elseif action == "alerts" then
     view = "alerts"
   elseif action == "tiny_next" then
-    tinyPage = tinyPage % 6 + 1
+    tinyPage = tinyPage % 8 + 1
   elseif action:sub(1, 7) == "select:" then
     selectedTurtleId = tonumber(action:sub(8)) or action:sub(8)
     view = "detail"
     controlNotice = nil
-  elseif action == "service_pause" or action == "stop_after_layer" or action == "fuel_check" then
+  elseif action == "map" then
+    if selected() then
+      view = "map"
+      controlNotice = nil
+    else
+      view = "overview"
+      controlNotice = "No active Turtle selected"
+    end
+  elseif action == "settings" then
+    view = "settings"
+    controlNotice = nil
+  elseif action == "toggle_warning_sound" then
+    warningSoundEnabled = not warningSoundEnabled
+    controlNotice = warningSoundEnabled and "Warning sound enabled" or "Warning sound muted"
+    if not saveMonitorSettings() then controlNotice = controlNotice .. " (could not save)" end
+  elseif action == "service_pause" or action == "stop_after_layer" or action == "fuel_check"
+    or action == "emergency_toggle" then
     sendCommand(action)
     return
   elseif action == "monitor_update" then
@@ -441,6 +644,7 @@ local function handleAction(action)
 end
 
 configureDisplay()
+loadMonitorSettings()
 
 local hasWirelessModem = false
 for _, side in ipairs(peripheral.getNames()) do
@@ -477,6 +681,13 @@ while true do
         if pending.command == "fuel_check" then
           controlNotice = "Fuel " .. textOf(ack.fuel) .. "/" .. textOf(ack.requiredFuel)
             .. (tonumber(ack.fuelShortfall) and ack.fuelShortfall > 0 and (" missing " .. ack.fuelShortfall) or " OK")
+        elseif pending.command == "emergency_toggle" then
+          local entry = turtles[sender]
+          if entry and entry.data and type(ack.emergencyMode) == "boolean" then
+            entry.data.emergencyMode = ack.emergencyMode
+            if ack.emergencyMessage ~= nil then entry.data.emergencyMessage = ack.emergencyMessage end
+          end
+          controlNotice = ack.emergencyMode and "Emergency mode enabled" or "Emergency mode disabled"
         else
           controlNotice = pending.command == "stop_after_layer" and "Stop after layer confirmed" or "Service pause confirmed"
         end

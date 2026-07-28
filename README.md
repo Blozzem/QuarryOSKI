@@ -82,11 +82,26 @@ When work resumes from the service station, it uses the same safe principle in
 reverse: it travels directly across the surface to the saved work cell and
 only then descends.
 
+## Emergency mode
+
+Emergency auto-return is enabled for every new quarry. If QuarryOS cannot move,
+mine or replay its saved route safely, it records the precise problem, alerts
+the monitor and makes one non-digging attempt to return to the service station.
+There it unloads, refuels and pauses. If that route is blocked too, the Turtle
+stays exactly where it is rather than forcing its way through; clear the path
+and run `q` to retry recovery. GPS failures and service-station problems are
+also saved as an emergency instead of being silently treated as normal work.
+
+The live monitor's Settings screen can turn automatic emergency return on or
+off for the selected Turtle. Turning it off never makes the Turtle continue
+through a problem: it still stops and records the reason, but does not try to
+travel back automatically.
+
 ## Liquid Guard
 
-After opening a field, the Turtle briefly places and removes a normal block
-below itself, then checks again for water or lava. A confirmed fluid position
-is recorded. In the following layer it passes through the flow, checks the
+When Lava is detected below, the Turtle briefly places and removes a normal
+block in that Lava field, then records the position. It does not place a test
+block into air or water. In the following layer it passes through the flow, checks the
 four surrounding walls and only seals a source block (`level = 0`) found in a
 wall. Flowing liquid itself is left alone, so the actual entry point is closed instead. QuarryOS
 keeps one stack of common building blocks (Cobblestone, Stone, Deepslate, Dirt
