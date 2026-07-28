@@ -115,7 +115,8 @@ put there. Fill it with a suitable block before starting. If that slot is empty,
 QuarryOS also tries to take a stack from the
 right normal-block chest. If none is available it pauses safely at the service
 station and tells you exactly which slot to fill. Add a suitable block to slot
-16 (or the right chest) and run `q` to continue.
+16 (or the right chest) and run `q` to continue. When the quarry is fully
+complete, its final service visit empties slot 16 into the right chest too.
 
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for

@@ -1408,7 +1408,37 @@ local function mineLayer()
   return true, "complete"
 end
 
+-- Slot 16 is protected during mining, but it must not prevent a finished
+-- quarry from completing. At the final service visit its reserve goes to the
+-- normal-block chest on the right just like every other remaining block.
+local function unloadFinalReserve()
+  if turtle.getItemCount(liquidGuardSlot) == 0 then return true end
+  dashboard("Final service - unloading the Slot 16 reserve...")
+  local selected = turtle.getSelectedSlot()
+  if not face(1) then return false end
+  local hasChest, detail = turtle.inspect()
+  if not hasChest or not isStorageBlock(detail) then
+    face(0)
+    printError("Normal-block chest is missing. Slot 16 was kept safely.")
+    return false
+  end
+
+  turtle.select(liquidGuardSlot)
+  while turtle.getItemCount(liquidGuardSlot) > 0 do
+    local before = turtle.getItemCount(liquidGuardSlot)
+    if not turtle.drop() or turtle.getItemCount(liquidGuardSlot) >= before then
+      turtle.select(selected)
+      face(0)
+      printError("Normal-block chest is full. Slot 16 was kept safely.")
+      return false
+    end
+  end
+  turtle.select(selected)
+  return face(0)
+end
+
 local function completeQuarry()
+  if not unloadFinalReserve() then return false end
   for slot = 1, 16 do
     if turtle.getItemCount(slot) > 0 then
       printError("Items remain in the turtle. The quarry state was kept safely.")
