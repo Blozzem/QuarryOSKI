@@ -199,9 +199,14 @@ local function setupMenu()
     return nil
   end
   if not turtle.forward() then
-    paint(colors.red)
-    print("The block in front must be clear for the GPS direction check.")
-    return nil
+    if turtle.detect() and turtle.dig() and turtle.forward() then
+      print("Mined the first quarry block for the GPS direction check.")
+    else
+      paint(colors.red)
+      print("Cannot move forward for GPS direction check.")
+      print("Remove the block in front or equip a working pickaxe.")
+      return nil
+    end
   end
   local forwardX, _, forwardZ = gps.locate(5)
   turtle.back()
