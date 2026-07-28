@@ -75,6 +75,26 @@ end
 
 local function paint(colour) term.setTextColor(colour) end
 
+-- Rednet only broadcasts through opened modems. A turtle normally has its
+-- Ender/Wireless Modem mounted as its second upgrade, so open it here before
+-- the first live-monitor update is sent.
+local monitorNetworkReady = false
+local function openMonitorModems()
+  local opened = false
+  for _, side in ipairs(peripheral.getNames()) do
+    if peripheral.getType(side) == "modem" then
+      local modem = peripheral.wrap(side)
+      if modem and modem.isWireless() then
+        local ok = pcall(rednet.open, side)
+        if ok then opened = true end
+      end
+    end
+  end
+  return opened
+end
+
+monitorNetworkReady = openMonitorModems()
+
 local function broadcastMonitor(message)
   local payload = {
     width = state.width, length = state.length, maximum = state.maximum,
@@ -82,11 +102,15 @@ local function broadcastMonitor(message)
     current = state.current, mined = state.mined,
     fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
   }
-  pcall(rednet.broadcast, textutils.serialize(payload), "quarryos-monitor")
+  if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
+  if monitorNetworkReady then
+    rednet.broadcast(textutils.serialize(payload), "quarryos-monitor")
+  end
 end
 
 local function notify(message)
-  pcall(rednet.broadcast, message, "quarryos-notify")
+  if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
+  if monitorNetworkReady then rednet.broadcast(message, "quarryos-notify") end
   broadcastMonitor("NOTICE: " .. message)
 end
 

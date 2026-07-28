@@ -22,3 +22,13 @@ current task on an Advanced Monitor.
 Use a larger multi-block Advanced Monitor for the clearest display. If the
 base monitor server is offline, the quarry continues normally using the turtle
 display.
+
+## If the screen stays on "Waiting for Turtle signal"
+
+Update and reboot **both** the Turtle and the monitor computer. The Turtle
+must have an Ender Modem or Wireless Modem mounted as its second Turtle upgrade
+(the other side can hold the pickaxe). The monitor computer needs its own
+wireless or Ender Modem attached directly to it.
+
+Normal Wireless Modems only work over a limited distance. Use Ender Modems for
+quarries far away from the base, at high depth, or in another dimension.

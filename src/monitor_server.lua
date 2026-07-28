@@ -41,6 +41,24 @@ local function draw(data)
   monitor.write(data.message or "Working...")
 end
 
+local function drawWaiting()
+  if monitor.setTextScale then monitor.setTextScale(0.5) end
+  monitor.setBackgroundColor(colors.black)
+  monitor.clear()
+  monitor.setCursorPos(1, 1)
+  monitor.setBackgroundColor(colors.blue)
+  monitor.setTextColor(colors.white)
+  monitor.write(" QuarryOS LIVE QUARRY ")
+  monitor.setBackgroundColor(colors.black)
+  monitor.setCursorPos(2, 4)
+  monitor.setTextColor(colors.yellow)
+  monitor.write("Waiting for Turtle signal...")
+  monitor.setCursorPos(2, 6)
+  monitor.setTextColor(colors.lightGray)
+  monitor.write("Check both Ender/Wireless Modems.")
+end
+
+drawWaiting()
 print("QuarryOS monitor server ready.")
 while true do
   local _, message, protocol = rednet.receive()
