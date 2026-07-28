@@ -753,6 +753,12 @@ local function cellForStep(step)
   return x, row
 end
 
+local function routeStepForCell(x, z)
+  if x < 1 or x > state.width or z < 0 or z >= state.length then return nil end
+  local column = z % 2 == 0 and (x - 1) or (state.width - x)
+  return z * state.width + column
+end
+
 local function directionTo(x, z)
   local deltaX, deltaZ = x - state.x, z - state.z
   if deltaX == 1 and deltaZ == 0 then return 0 end
@@ -789,6 +795,24 @@ local function moveToRouteStep(step, allowDig)
   state.positionStep = step
   state.pendingMove = nil
   saveState()
+  return true
+end
+
+-- Every completed layer below the turtle is open air, so returning across its
+-- movement plane can take the shortest Manhattan path to the access shaft.
+-- The route step is still saved after every move, keeping GPS recovery and
+-- the old zig-zag fallback safe after a restart.
+local function moveDirectlyTo(x, z)
+  while state.x ~= x or state.z ~= z do
+    local nextX, nextZ = state.x, state.z
+    if state.x < x then nextX = state.x + 1
+    elseif state.x > x then nextX = state.x - 1
+    elseif state.z < z then nextZ = state.z + 1
+    else nextZ = state.z - 1 end
+
+    local step = routeStepForCell(nextX, nextZ)
+    if not step or not moveToRouteStep(step, false) then return false end
+  end
   return true
 end
 
@@ -889,9 +913,14 @@ end
 local function returnToBase()
   state.phase = "returning"
   saveState()
-  dashboard("Returning to service chests...")
-  while state.positionStep > 0 do
-    if not moveToRouteStep(state.positionStep - 1) then return false end
+  dashboard("Returning directly to the service station...")
+  if state.positionStep > 0 and not moveDirectlyTo(1, 0) then
+    -- An entity or player can temporarily block the direct path. Continue on
+    -- the already-cleared snake route instead of digging through anything.
+    dashboard("Direct path blocked - using the safe return route...")
+    while state.positionStep > 0 do
+      if not moveToRouteStep(state.positionStep - 1) then return false end
+    end
   end
   while state.depth > 0 do
     if not moveUp(false) then return false end
