@@ -972,8 +972,13 @@ local function serviceChest(requiredFuel)
     print("Use a smaller quarry plan or start a new quarry.")
     return false
   end
+  -- Fill completely at every service visit when possible. The required amount
+  -- remains the safety threshold; an empty fuel chest may still leave the
+  -- Turtle short of full but able to continue safely.
+  local fuelTarget = fuelCapacity()
+  if fuelTarget == math.huge then fuelTarget = requiredFuel end
   local attempts = 0
-  while fuelLevel() < requiredFuel and attempts < 1024 do
+  while fuelLevel() < fuelTarget and attempts < 4096 do
     local fuelSlot
     for slot = 16, 1, -1 do
       if turtle.getItemCount(slot) == 0 then
@@ -996,6 +1001,9 @@ local function serviceChest(requiredFuel)
     printError("Add more usable fuel to the top fuel chest, then restart the quarry.")
     print("Need " .. requiredFuel .. ", have " .. fuelLevel() .. ".")
     return false
+  end
+  if fuelLevel() < fuelTarget then
+    print("Fuel chest is empty - continuing safely with " .. fuelLevel() .. " fuel.")
   end
   return true
 end
