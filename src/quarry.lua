@@ -533,7 +533,7 @@ local function setupMenu()
     width = width, length = length, maximum = maximum,
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
-    layerComplete = false, bedrockFound = false, phase = "surface",
+    layerComplete = false, bedrockFound = false, phase = "surface", fluidChecks = {},
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
     started = os.epoch("utc"), plan = choice,
@@ -1065,6 +1065,7 @@ local function fluidCheckKey(layer, x, z)
 end
 
 local function queueFluidCheck(kind)
+  state.fluidChecks = state.fluidChecks or {}
   local targetLayer = state.layer + 1
   if state.maximum > 0 and targetLayer > state.maximum then return end
   local key = fluidCheckKey(targetLayer, state.x, state.z)
@@ -1122,6 +1123,7 @@ end
 -- Turtle leaves the flowing fluid alone and only places a block into a fluid
 -- block found directly in one of the four surrounding walls.
 local function checkFluidWalls()
+  state.fluidChecks = state.fluidChecks or {}
   local key = fluidCheckKey(state.layer, state.x, state.z)
   local marker = state.fluidChecks[key]
   if not marker then return true end
