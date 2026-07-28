@@ -281,7 +281,9 @@ local function drawDetailCompact(entry)
   drawButton(7, 9, 6, "STOP", THEME.warning, "stop_after_layer")
   drawButton(14, 9, 6, "FUEL", THEME.accent, "fuel_check")
   drawButton(21, 9, 6, "LIST", THEME.muted, "overview")
-  drawCenteredButton(10, "ALARMS " .. #alerts, THEME.alert, "alerts")
+  local alarmWidth = math.max(10, math.floor((screenWidth - 1) / 2))
+  drawButton(1, 10, alarmWidth, "ALARMS " .. #alerts, THEME.alert, "alerts")
+  drawButton(alarmWidth + 2, 10, screenWidth - alarmWidth - 1, "UPDATE", THEME.safe, "monitor_update")
 end
 
 local function drawDetailTiny(entry)
@@ -301,6 +303,7 @@ local function drawDetailTiny(entry)
     { "FUEL CHECK", THEME.accent, "fuel_check" },
     { "TURTLES", THEME.muted, "overview" },
     { "ALARMS " .. #alerts, THEME.alert, "alerts" },
+    { "UPDATE", THEME.safe, "monitor_update" },
   }
   local page = pages[tinyPage]
   drawCenteredButton(10, page[1], page[2], page[3])
@@ -388,6 +391,28 @@ local function sendCommand(commandName)
   render()
 end
 
+-- This function only exists in the monitor program. It installs the current
+-- release on this computer, then reboots this monitor computer alone. Turtle
+-- computers never receive an update or reboot command from this button.
+local function updateThisMonitor()
+  if pending then
+    controlNotice = "Wait for the active request before updating"
+    render()
+    return
+  end
+  controlNotice = "Updating this monitor - rebooting shortly..."
+  render()
+  local updated = shell.run("/quarryos/update.lua")
+  if updated then
+    controlNotice = "Update complete - rebooting monitor..."
+    render()
+    sleep(1)
+    os.reboot()
+  end
+  controlNotice = "Monitor update failed - see this computer's terminal"
+  render()
+end
+
 local function handleAction(action)
   if action == "overview" then
     view = "overview"
@@ -395,13 +420,16 @@ local function handleAction(action)
   elseif action == "alerts" then
     view = "alerts"
   elseif action == "tiny_next" then
-    tinyPage = tinyPage % 5 + 1
+    tinyPage = tinyPage % 6 + 1
   elseif action:sub(1, 7) == "select:" then
     selectedTurtleId = tonumber(action:sub(8)) or action:sub(8)
     view = "detail"
     controlNotice = nil
   elseif action == "service_pause" or action == "stop_after_layer" or action == "fuel_check" then
     sendCommand(action)
+    return
+  elseif action == "monitor_update" then
+    updateThisMonitor()
     return
   end
   render()
