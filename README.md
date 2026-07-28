@@ -59,9 +59,10 @@ mine until bedrock):
 q
 ```
 
-It clears every horizontal layer in a zig-zag path before descending to the
-next one. Between layers, and whenever the inventory is full or fuel reaches a
-safe return reserve, it returns to the starting corner, sorts its items into the
+It clears every horizontal layer in a zig-zag path before descending directly
+into the next one and reversing the path. It returns to the starting corner only
+when the inventory is full, fuel reaches a safe return reserve, at the final
+layer, or when a service pause is requested. There it sorts items into the
 output chests, refuels and continues. Progress survives restarts. In bedrock
 mode it finishes the complete first layer where bedrock is encountered, which
 keeps the quarry floor level and safe. Use `stats` to view statistics for the

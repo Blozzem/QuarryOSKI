@@ -8,6 +8,14 @@ local screenWidth, screenHeight = monitor.getSize()
 local textScale = monitor.getTextScale and monitor.getTextScale() or nil
 local layout = "tiny"
 local lastData = nil
+local lastTurtleId = nil
+local controlNotice = nil
+local controlButton = nil
+local requestNumber = 0
+local pendingRequestId = nil
+local pendingJobId = nil
+local pendingTurtleId = nil
+local pendingControl = nil
 
 -- A 26-character threshold selects scale 1.0 on a normal 3x3 monitor and
 -- scale 1.5 on a normal 5x5 monitor. Narrow monitors use the tiny layout
@@ -94,9 +102,33 @@ local function beginFrame(title)
   monitor.setBackgroundColor(colors.black)
 end
 
+local function drawControlButton(y, label)
+  local text = " " .. label .. " "
+  text = clip(text, screenWidth)
+  local x = math.max(1, math.floor((screenWidth - #text) / 2) + 1)
+
+  monitor.setCursorPos(x, y)
+  monitor.setBackgroundColor(colors.red)
+  monitor.setTextColor(colors.white)
+  monitor.write(text)
+  monitor.setBackgroundColor(colors.black)
+
+  controlButton = { left = x, right = x + #text - 1, top = y, bottom = y }
+end
+
 local function textOf(input, fallback)
   if input == nil then return fallback or "?" end
   return tostring(input)
+end
+
+local function nextRequestId()
+  requestNumber = requestNumber + 1
+  local timestamp = os.epoch and os.epoch("utc") or math.floor(os.clock() * 1000)
+  return "monitor-" .. tostring(os.getComputerID()) .. "-" .. tostring(timestamp) .. "-" .. tostring(requestNumber)
+end
+
+local function statusLine(data, fallback)
+  return controlNotice or textOf(data.message, fallback)
 end
 
 local function oneBased(input)
@@ -117,6 +149,9 @@ local function depthLine(data, short)
 end
 
 local function stepLine(data, short)
+  if data.layerProgress ~= nil and data.totalCells ~= nil then
+    return (short and "Done " or "Done: ") .. textOf(data.layerProgress) .. "/" .. textOf(data.totalCells)
+  end
   if data.positionStep == nil and data.progressStep == nil then return nil end
   return (short and "S " or "Step: ") .. textOf(data.positionStep) .. "/" .. textOf(data.progressStep)
 end
@@ -131,7 +166,8 @@ local function drawCompact(data)
   if step then writeAt(1, 6, step, colors.lightGray) end
   writeAt(1, 7, "Fuel: " .. textOf(data.fuel), colors.lime)
   writeAt(1, 8, "Blocks: " .. textOf(data.blocks), colors.lightGray)
-  writeAt(1, 10, textOf(data.message, "Working..."), colors.yellow)
+  writeAt(1, 9, statusLine(data, "Working..."), colors.yellow)
+  drawControlButton(10, "SERVICE & PAUSE")
 end
 
 local function drawTiny(data)
@@ -143,9 +179,9 @@ local function drawTiny(data)
 
   local step = stepLine(data, true)
   if step then writeAt(1, 7, step, colors.lightGray) end
-  writeAt(1, 8, "F " .. textOf(data.fuel), colors.lime)
-  writeAt(1, 9, "B " .. textOf(data.blocks), colors.lightGray)
-  writeAt(1, 10, textOf(data.message, "Working..."), colors.yellow)
+  writeAt(1, 8, "F " .. textOf(data.fuel) .. " B " .. textOf(data.blocks), colors.lime)
+  writeAt(1, 9, statusLine(data, "Working..."), colors.yellow)
+  drawControlButton(10, "SVC & PAUSE")
 end
 
 local function draw(data)
@@ -163,13 +199,16 @@ local function drawWaiting()
     writeAt(1, 5, "No signal received.", colors.lightGray)
     writeAt(1, 7, "Check Ender/Wireless", colors.lightGray)
     writeAt(1, 8, "Modems on both ends.", colors.lightGray)
-    writeAt(1, 10, "Scale " .. textOf(textScale), colors.cyan)
+    writeAt(1, 9, controlNotice or ("Scale " .. textOf(textScale)), colors.cyan)
+    drawControlButton(10, "SERVICE & PAUSE")
   else
     beginFrame("QUARRYOS")
     writeAt(1, 3, "Waiting for", colors.yellow)
     writeAt(1, 4, "Turtle", colors.yellow)
     writeAt(1, 6, "Check modems", colors.lightGray)
     writeAt(1, 8, "Scale " .. textOf(textScale), colors.cyan)
+    writeAt(1, 9, controlNotice or "", colors.yellow)
+    drawControlButton(10, "SVC & PAUSE")
   end
 end
 
@@ -195,11 +234,72 @@ while true do
     if protocol == "quarryos-monitor" then
       local data = textutils.unserialize(message)
       if data then
+        controlNotice = nil
         lastData = data
+        lastTurtleId = first
+        if pendingJobId and data.jobId ~= pendingJobId then
+          pendingRequestId = nil
+          pendingJobId = nil
+          pendingTurtleId = nil
+          pendingControl = nil
+        end
         draw(data)
+      end
+    elseif protocol == "quarryos-control-ack" then
+      local ack = textutils.unserialize(message)
+      if ack and ack.command == "service_pause_ack" and first == pendingTurtleId
+        and ack.requestId == pendingRequestId and ack.jobId == pendingJobId then
+        pendingRequestId = nil
+        pendingJobId = nil
+        pendingTurtleId = nil
+        pendingControl = nil
+        controlNotice = layout == "compact" and "Request confirmed" or "REQ confirmed"
+        if lastData then draw(lastData) else drawWaiting() end
+        print("Service & pause request confirmed by Turtle " .. tostring(first) .. ".")
       end
     elseif protocol == "quarryos-notify" then
       print("Quarry notification: " .. message)
+    end
+  elseif event == "monitor_touch" and (not monitorName or first == monitorName) then
+    local x, y = second, third
+    if controlButton and x >= controlButton.left and x <= controlButton.right and y >= controlButton.top and y <= controlButton.bottom then
+      if pendingRequestId then
+        local resent = pendingTurtleId and pendingControl
+          and rednet.send(pendingTurtleId, pendingControl, "quarryos-control")
+        controlNotice = resent and (layout == "compact" and "Request resent - waiting" or "REQ resent")
+          or (layout == "compact" and "Retry could not send" or "Retry failed")
+        if lastData then draw(lastData) else drawWaiting() end
+        if resent then
+          print("Service & pause request resent to Turtle " .. tostring(pendingTurtleId) .. ".")
+        else
+          print("Could not resend the pending service & pause request.")
+        end
+      elseif not lastTurtleId or not lastData or not lastData.jobId then
+        controlNotice = layout == "compact" and "No active quarry signal" or "No quarry signal"
+        if lastData then draw(lastData) else drawWaiting() end
+        print("Cannot send service request: no active quarry status with a job ID.")
+      else
+        local requestId = nextRequestId()
+        local control = textutils.serialize({
+          command = "service_pause",
+          jobId = lastData.jobId,
+          requestId = requestId,
+        })
+        local sent = rednet.send(lastTurtleId, control, "quarryos-control")
+        if sent then
+          pendingRequestId = requestId
+          pendingJobId = lastData.jobId
+          pendingTurtleId = lastTurtleId
+          pendingControl = control
+        end
+        controlNotice = sent and (layout == "compact" and "Request sent - waiting" or "REQ sent; wait") or "Request could not send"
+        if lastData then draw(lastData) else drawWaiting() end
+        if sent then
+          print("Service & pause request sent to Turtle " .. tostring(lastTurtleId) .. ". Waiting for confirmation.")
+        else
+          print("Could not send service & pause request to Turtle " .. tostring(lastTurtleId) .. ".")
+        end
+      end
     end
   elseif event == "monitor_resize" and (not monitorName or first == monitorName) then
     -- setTextScale queues this event too. Only recalculate when the terminal

@@ -34,6 +34,31 @@ For a multi-block monitor, place all monitor blocks as one continuous
 rectangle with the same facing and orientation. Otherwise CC:Tweaked treats
 the pieces as separate monitors.
 
+## Service and pause from the monitor
+
+Touch the red **SERVICE & PAUSE** button on the live display. It sends a
+service-and-pause request directly to the Turtle which last reported that
+quarry's status. The Turtle returns to the service station, unloads, refuels
+and pauses at its next safe movement point.
+
+The monitor first shows only **Request sent**. This confirms that its modem
+sent the request, not that the Turtle has already received it or paused. When
+the Turtle accepts it, the monitor changes this to **Request confirmed**.
+Confirmation means that the command was accepted, not that the Turtle has
+already reached service; wait for the next Turtle status update before assuming
+it has paused there. If no confirmation appears, touch the button again to
+resend the same safe request to that Turtle.
+
+To continue the paused quarry, go to the Turtle and run:
+
+```lua
+q
+```
+
+The monitor button does not resume a quarry, so it cannot start the Turtle by
+accident. Update both the Turtle and the monitor computer before using this
+control.
+
 ## If the screen stays on "Waiting for Turtle signal"
 
 Update and reboot **both** the Turtle and the monitor computer. The Turtle

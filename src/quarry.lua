@@ -85,6 +85,21 @@ if state and not state.stats then
   state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 }
 end
 if state then
+  -- Plans created by the first layer release always travelled forwards. Add
+  -- the new direction/progress fields without losing a job which is already
+  -- in progress.
+  local totalCells = state.width * state.length
+  state.nextCell = state.nextCell or 0
+  state.routeDirection = state.routeDirection or 1
+  if state.layerProgress == nil then
+    state.layerProgress = state.layerComplete and totalCells or math.max(0, state.nextCell)
+  end
+  if state.layerProgress >= totalCells and state.nextCell >= totalCells then
+    state.layerProgress = totalCells
+    state.nextCell = totalCells - 1
+  end
+  state.version = math.max(2, state.version or 1)
+  state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
 end
@@ -163,6 +178,7 @@ monitorNetworkReady = openMonitorModems()
 local function broadcastMonitor(message)
   local total = state.width * state.length
   local payload = {
+    jobId = state.jobId, phase = state.phase,
     width = state.width, length = state.length, maximum = state.maximum,
     -- The work area begins one block in front of the service corner, so turn
     -- the local X coordinate back into a zero-based in-area monitor position.
@@ -170,6 +186,7 @@ local function broadcastMonitor(message)
     current = state.depth, mined = state.layer,
     layer = state.layer, nextCell = state.nextCell, totalCells = total,
     positionStep = state.positionStep + 1, progressStep = total,
+    layerProgress = state.layerProgress,
     fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
   }
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
@@ -209,7 +226,7 @@ local function dashboard(message)
   paint(colors.lightGray)
   write("Cell: ")
   paint(colors.white)
-  write(math.min(state.nextCell + 1, total) .. "/" .. total .. "  (" .. state.x .. "," .. state.z .. ")")
+  write(math.min((state.layerProgress or 0) + 1, total) .. "/" .. total .. "  (" .. state.x .. "," .. state.z .. ")")
   term.setCursorPos(2, 7)
   paint(colors.lightGray)
   write("Work depth: ")
@@ -401,14 +418,15 @@ local function setupMenu()
   write("Start this quarry? [Y/n] ")
   if read():lower() == "n" then return nil end
   return {
-    layout = stateLayout, version = 1,
+    layout = stateLayout, version = 2,
     width = width, length = length, maximum = maximum,
     x = 0, z = 0, heading = 0, depth = 0,
-    layer = 1, nextCell = 0, positionStep = -1,
+    layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
     layerComplete = false, bedrockFound = false, phase = "surface",
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
     started = os.epoch("utc"), plan = choice,
+    jobId = tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")),
   }
 end
 
@@ -468,12 +486,13 @@ local function verifySavedPosition()
   return true
 end
 
+local resumePausedQuarry = state and state.phase == "paused"
 if not state then
   state = setupMenu()
   if not state then return end
   saveState()
   notify("Layer quarry started: " .. state.width .. "x" .. state.length)
-elseif state.phase == "surface" and not preflightCheck(true) then
+elseif (state.phase == "surface" or resumePausedQuarry) and not preflightCheck(true) then
   paint(colors.white)
   print("Fix the service chests before resuming this quarry.")
   return
@@ -481,6 +500,13 @@ end
 
 if not resolvePendingMove() then return end
 if not verifySavedPosition() then return end
+if resumePausedQuarry then
+  state.phase = "surface"
+  state.pauseRequested = nil
+  state.pauseRequestId = nil
+  saveState()
+  print("Resuming the quarry from the service station...")
+end
 
 -- These are local coordinates: 0 is the start-facing direction, then right,
 -- back and left. GPS conversion above uses the recorded start-facing vector.
@@ -497,11 +523,23 @@ local function turnRight()
   return true
 end
 
-local function face(direction)
-  while state.heading ~= direction do
-    if not turnRight() then return false end
+local function turnLeft()
+  local turned, reason = turtle.turnLeft()
+  if not turned then
+    printError("Cannot turn the turtle: " .. (reason or "unknown reason"))
+    return false
   end
+  state.heading = (state.heading + 3) % 4
+  saveState()
   return true
+end
+
+local function face(direction)
+  local turnCount = (direction - state.heading) % 4
+  if turnCount == 0 then return true end
+  if turnCount == 1 then return turnRight() end
+  if turnCount == 2 then return turnRight() and turnRight() end
+  return turnLeft()
 end
 
 local function moveForward(allowDig)
@@ -664,7 +702,7 @@ local function fuelForResume()
   -- back to the service corner after a useful chunk of layer work. This avoids
   -- a wasteful service trip after only a handful of cells.
   local total = state.width * state.length
-  local workChunk = math.min(256, math.max(0, total - state.nextCell))
+  local workChunk = math.min(256, math.max(0, total - (state.layerProgress or 0)))
   return math.max(64, (workDepth + state.nextCell + workChunk + 1) * 2 + 24)
 end
 
@@ -689,35 +727,30 @@ local function serviceChest(requiredFuel)
       local valuable = name:find("ore") or name:find("raw_") or name:find("diamond")
         or name:find("emerald") or name:find("lapis") or name:find("redstone")
         or name:find("quartz") or name:find("ancient_debris")
-      local turnsToChest = valuable and 3 or 1
-      local turnsBack = valuable and 1 or 3
-      for _ = 1, turnsToChest do
-        if not turnRight() then return false end
-      end
+      local chestDirection = valuable and 3 or 1
+      if not face(chestDirection) then return false end
       local hasOutputChest, outputChestDetail = turtle.inspect()
       if not hasOutputChest or not isStorageBlock(outputChestDetail) then
-        for _ = 1, turnsBack do turnRight() end
+        face(0)
         printError("Output chest is missing or is not storage. Nothing was dropped.")
         return false
       end
       while turtle.getItemCount(slot) > 0 do
         local stillStorage, currentOutputDetail = turtle.inspect()
         if not stillStorage or not isStorageBlock(currentOutputDetail) then
-          for _ = 1, turnsBack do turnRight() end
+          face(0)
           printError("Output chest disappeared. Nothing else was dropped.")
           return false
         end
         local before = turtle.getItemCount(slot)
         local dropped = turtle.drop()
         if not dropped or turtle.getItemCount(slot) >= before then
-          for _ = 1, turnsBack do turnRight() end
+          face(0)
           printError("Output chest is full. Empty it and restart the quarry.")
           return false
         end
       end
-      for _ = 1, turnsBack do
-        if not turnRight() then return false end
-      end
+      if not face(0) then return false end
     end
   end
 
@@ -765,20 +798,33 @@ local function returnToBase()
   return true
 end
 
+local function moveAlongRouteTo(targetStep)
+  while state.positionStep ~= targetStep do
+    if state.pauseRequested then return false, "pause" end
+    local nextStep = state.positionStep < targetStep and state.positionStep + 1 or state.positionStep - 1
+    if not moveToRouteStep(nextStep) then return false, "blocked" end
+  end
+  if state.pauseRequested then return false, "pause" end
+  return true
+end
+
 local function prepareWorkingPosition()
+  if state.pauseRequested then return false, "pause" end
   local targetDepth = state.layer - 1
   -- Walk from the protected service corner to the first work cell. This cell
   -- is the vertical access shaft for deeper layers.
   state.phase = "replaying"
   saveState()
   if state.positionStep < 0 then
-    if not moveToRouteStep(0) then return false end
+    if not moveToRouteStep(0) then return false, "blocked" end
+    if state.pauseRequested then return false, "pause" end
   end
 
   state.phase = "descending"
   saveState()
   while state.depth < targetDepth do
-    if not moveDown(false) then return false end
+    if state.pauseRequested then return false, "pause" end
+    if not moveDown(false) then return false, "blocked" end
   end
   if state.depth ~= targetDepth then
     printError("Turtle depth is deeper than the saved layer.")
@@ -787,13 +833,13 @@ local function prepareWorkingPosition()
 
   state.phase = "replaying"
   saveState()
-  while state.positionStep < state.nextCell do
-    if not moveToRouteStep(state.positionStep + 1) then return false end
-  end
-  if state.positionStep ~= state.nextCell then
+  local reached, reason = moveAlongRouteTo(state.nextCell)
+  if not reached then
+    if reason == "pause" then return false, "pause" end
     printError("Turtle cannot reach the saved layer progress safely.")
-    return false
+    return false, "blocked"
   end
+  if state.pauseRequested then return false, "pause" end
   state.phase = "mining"
   saveState()
   return true
@@ -826,35 +872,35 @@ local function mineLayer()
   -- A restart may happen after a cell was mined and saved, but just before the
   -- turtle moved to the next cell. That path is already clear, so restore the
   -- expected position instead of treating the job as corrupt.
-  if state.nextCell >= total then
+  if (state.layerProgress or 0) >= total then
     state.layerComplete = true
     state.phase = "layer_complete"
     saveState()
     return true, "complete"
   end
-  if state.positionStep < state.nextCell then
+  if state.positionStep ~= state.nextCell then
     state.phase = "replaying"
     saveState()
-    while state.positionStep < state.nextCell do
-      if not moveToRouteStep(state.positionStep + 1) then return false, "blocked" end
-    end
+    local replayed, replayReason = moveAlongRouteTo(state.nextCell)
+    if not replayed then return false, replayReason or "blocked" end
     state.phase = "mining"
     saveState()
-  elseif state.positionStep > state.nextCell then
-    printError("Layer position is ahead of the saved progress.")
-    return false, "blocked"
   end
 
-  while state.nextCell < total do
+  while state.layerProgress < total do
     if state.positionStep ~= state.nextCell then
       printError("Layer position and saved progress do not match.")
       return false, "blocked"
+    end
+    if state.pauseRequested then
+      dashboard("Service & pause requested - returning safely...")
+      return false, "pause"
     end
     if inventoryFull() then
       dashboard("Inventory full - returning to service chests...")
       return false, "service"
     end
-    local hasNextMove = state.nextCell < total - 1
+    local hasNextMove = state.layerProgress < total - 1
     if fuelLevel() < fuelForSafeReturn(hasNextMove) then
       dashboard("Fuel reserve reached - returning to service chests...")
       return false, "service"
@@ -862,11 +908,17 @@ local function mineLayer()
 
     dashboard("Mining layer " .. state.layer .. "...")
     if not mineCurrentCell() then return false, "blocked" end
-    state.nextCell = state.nextCell + 1
-    saveState()
 
-    if state.nextCell < total then
+    state.layerProgress = state.layerProgress + 1
+    if state.layerProgress < total then
+      state.nextCell = state.nextCell + state.routeDirection
+      saveState()
       if not moveToRouteStep(state.nextCell) then return false, "blocked" end
+    else
+      state.layerComplete = true
+      state.phase = "layer_complete"
+      saveState()
+      return true, "complete"
     end
   end
   state.layerComplete = true
@@ -903,44 +955,203 @@ local function completeQuarry()
   return true
 end
 
--- Recover safely from a restart in the middle of a return trip or a layer
--- transition before deciding which work action is next.
-if state.phase == "returning" or state.phase == "layer_complete" then
-  if not returnToBase() then return end
-elseif state.phase ~= "surface" and state.phase ~= "mining" and state.phase ~= "descending" and state.phase ~= "replaying" then
-  printError("Unknown quarry phase: " .. tostring(state.phase))
-  return
+local function atServiceStation()
+  return state.positionStep == -1 and state.depth == 0 and state.x == 0 and state.z == 0
 end
 
-while true do
-  if state.phase == "surface" then
-    if state.layerComplete then
-      if state.bedrockFound or (state.maximum > 0 and state.layer >= state.maximum) then
-        dashboard(state.bedrockFound and "Bedrock layer reached - final service..." or "Final service visit...")
-        if not serviceChest(0) then return end
-        if completeQuarry() then return end
+local function finalLayerReached()
+  return state.bedrockFound or (state.maximum > 0 and state.layer >= state.maximum)
+end
+
+local function serviceReasonAtLayerBoundary()
+  if state.pauseRequested then return "pause" end
+  if inventoryFull() then return "service" end
+  if fuelLevel() < fuelForSafeReturn(true) then return "service" end
+  return nil
+end
+
+local function beginNextLayer()
+  local startStep = state.nextCell
+  if startStep < 0 or startStep >= state.width * state.length then
+    printError("The completed layer has no valid starting cell for the next layer.")
+    return false
+  end
+
+  -- Stay at the end of the previous snake path. The next layer uses the same
+  -- path in reverse, so it can descend immediately instead of travelling back
+  -- to the service station after every completed layer.
+  state.phase = "transitioning"
+  saveState()
+  state.layer = state.layer + 1
+  state.nextCell = startStep
+  state.layerProgress = 0
+  state.routeDirection = -state.routeDirection
+  state.layerComplete = false
+  state.bedrockFound = false
+  state.phase = "descending"
+  saveState()
+  return prepareWorkingPosition()
+end
+
+local function pauseAtServiceStation()
+  -- Mark the pause before touching any chest. A full or missing chest must not
+  -- make the turtle leave the service station again after a restart.
+  state.phase = "paused"
+  state.pauseRequested = nil
+  state.pauseRequestId = nil
+  saveState()
+  dashboard("Paused at service station. Unloading and refuelling...")
+  local serviced = serviceChest(fuelForResume())
+  if serviced then
+    dashboard("Paused at service station. Run 'q' to continue.")
+  else
+    dashboard("Paused at service station. Fix service chests/fuel, then run 'q'.")
+  end
+  notify("Quarry paused at the service station. Run q on the turtle to continue.")
+  return false
+end
+
+local function handleCompletedLayer()
+  local reason = serviceReasonAtLayerBoundary()
+  if finalLayerReached() then
+    -- A manual pause wins over automatic completion, so the user can inspect
+    -- the last layer before choosing to resume and finish the job.
+    if reason == "pause" then
+      if not atServiceStation() and not returnToBase() then return false end
+      return pauseAtServiceStation()
+    end
+    if not atServiceStation() and not returnToBase() then return false end
+    if state.pauseRequested then return pauseAtServiceStation() end
+    dashboard(state.bedrockFound and "Bedrock layer reached - final service..." or "Final service visit...")
+    if not serviceChest(0) then return false end
+    if state.pauseRequested then return pauseAtServiceStation() end
+    completeQuarry()
+    return false
+  end
+
+  if reason then
+    if not atServiceStation() and not returnToBase() then return false end
+    if reason == "pause" then return pauseAtServiceStation() end
+    dashboard("Layer complete - service needed before continuing...")
+    if not serviceChest(fuelForResume()) then return false end
+    if state.pauseRequested then return pauseAtServiceStation() end
+  end
+
+  if state.pauseRequested then
+    if not atServiceStation() and not returnToBase() then return false end
+    return pauseAtServiceStation()
+  end
+  local started, startReason = beginNextLayer()
+  if not started and startReason == "pause" then
+    if not atServiceStation() and not returnToBase() then return false end
+    return pauseAtServiceStation()
+  end
+  return started
+end
+
+local function decodeControl(message)
+  if type(message) == "table" then return message end
+  if type(message) ~= "string" then return nil end
+  local ok, command = pcall(textutils.unserialize, message)
+  return ok and command or nil
+end
+
+local function acknowledgeControl(sender, command, status)
+  if not sender then return end
+  rednet.send(sender, textutils.serialize({
+    command = "service_pause_ack", jobId = state.jobId,
+    requestId = command.requestId, status = status,
+  }), "quarryos-control-ack")
+end
+
+-- The listener runs beside the mining loop. It only records a request; the
+-- worker accepts it at a saved cell boundary and never interrupts a move/dig.
+local function controlListener()
+  while true do
+    local sender, message = rednet.receive("quarryos-control")
+    local command = decodeControl(message)
+    if command and command.command == "service_pause" and command.jobId == state.jobId then
+      if state.phase == "paused" then
+        acknowledgeControl(sender, command, "paused")
+      elseif state.pauseRequested then
+        -- A monitor may retry the same direct message when its ACK was lost.
+        -- The desired state is already saved, so just acknowledge it again.
+        acknowledgeControl(sender, command, "accepted")
+      else
+        state.pauseRequested = true
+        state.pauseRequestId = command.requestId
+        saveState()
+        acknowledgeControl(sender, command, "accepted")
+        notify("Service & pause requested from the monitor.")
+      end
+    end
+  end
+end
+
+local function runQuarry()
+  -- Recover safely from a restart in the middle of a return trip or a layer
+  -- transition before deciding which work action is next.
+  if state.phase == "returning" then
+    if not returnToBase() then return end
+  elseif state.phase == "transitioning" then
+    local started, startReason = beginNextLayer()
+    if not started then
+      if startReason == "pause" and returnToBase() then pauseAtServiceStation() end
+      return
+    end
+  elseif state.phase ~= "surface" and state.phase ~= "mining" and state.phase ~= "descending"
+    and state.phase ~= "replaying" and state.phase ~= "layer_complete" then
+    printError("Unknown quarry phase: " .. tostring(state.phase))
+    return
+  end
+
+  while true do
+    if state.phase == "surface" then
+      if state.pauseRequested then
+        pauseAtServiceStation()
+        return
+      elseif state.layerComplete then
+        if not handleCompletedLayer() then return end
+      else
+        if not serviceChest(fuelForResume()) then return end
+        if state.pauseRequested then
+          pauseAtServiceStation()
+          return
+        end
+        local prepared, prepareReason = prepareWorkingPosition()
+        if not prepared then
+          if prepareReason == "pause" and returnToBase() then pauseAtServiceStation() end
+          return
+        end
+      end
+    elseif state.phase == "layer_complete" then
+      if not handleCompletedLayer() then return end
+    elseif state.phase == "descending" or state.phase == "replaying" then
+      local prepared, prepareReason = prepareWorkingPosition()
+      if not prepared then
+        if prepareReason == "pause" and returnToBase() then pauseAtServiceStation() end
         return
       end
-      state.layer = state.layer + 1
-      state.nextCell = 0
-      -- returnToBase leaves the turtle at the protected service corner
-      -- (route step -1). Keep that position so prepareWorkingPosition moves
-      -- it back to the first quarry cell before descending into the next layer.
-      state.positionStep = -1
-      state.layerComplete = false
-      state.bedrockFound = false
-      saveState()
     end
 
-    if not serviceChest(fuelForResume()) then return end
-    if not prepareWorkingPosition() then return end
-  elseif state.phase == "descending" or state.phase == "replaying" then
-    if not prepareWorkingPosition() then return end
+    if state.phase == "mining" then
+      local _, result = mineLayer()
+      if result == "blocked" then return end
+      if result == "pause" or result == "service" then
+        if not returnToBase() then return end
+        if state.pauseRequested then
+          pauseAtServiceStation()
+          return
+        end
+      end
+      -- A completed layer is deliberately handled on the next loop pass. It
+      -- may descend straight into the reverse route without a service visit.
+    end
   end
+end
 
-  if state.phase == "mining" then
-    local _, result = mineLayer()
-    if result == "blocked" then return end
-    if not returnToBase() then return end
-  end
+if monitorNetworkReady then
+  parallel.waitForAny(runQuarry, controlListener)
+else
+  runQuarry()
 end
