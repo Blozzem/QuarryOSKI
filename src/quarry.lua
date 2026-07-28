@@ -913,17 +913,22 @@ end
 local function returnToBase()
   state.phase = "returning"
   saveState()
-  dashboard("Returning directly to the service station...")
+  -- Previous full layers leave a clear vertical column above every work cell.
+  -- Rise immediately so a service trip spends as little time as possible in
+  -- the underground work area where mobs can gather.
+  dashboard("Returning to the service level...")
+  while state.depth > 0 do
+    if not moveUp(false) then return false end
+  end
+
+  dashboard("Crossing the service level to the station...")
   if state.positionStep > 0 and not moveDirectlyTo(1, 0) then
     -- An entity or player can temporarily block the direct path. Continue on
-    -- the already-cleared snake route instead of digging through anything.
+    -- the already-cleared surface route instead of digging through anything.
     dashboard("Direct path blocked - using the safe return route...")
     while state.positionStep > 0 do
       if not moveToRouteStep(state.positionStep - 1) then return false end
     end
-  end
-  while state.depth > 0 do
-    if not moveUp(false) then return false end
   end
   if state.positionStep == 0 then
     if not moveToRouteStep(-1) then return false end

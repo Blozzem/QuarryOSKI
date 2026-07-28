@@ -72,9 +72,10 @@ last completed quarry. The Turtle screen and live monitor show percentage and
 an estimated remaining time. Custom fixed-depth plans are exact; bedrock plans
 use the usual Overworld bedrock level as a clearly marked approximation.
 
-For service trips, it crosses the already-clear movement layer directly to the
-access shaft instead of retracing the entire mining snake. If that short route
-is blocked by an entity, QuarryOS falls back to the recorded safe route.
+For service trips, it rises immediately to the already-clear service level,
+then crosses directly to the access shaft instead of retracing the entire
+mining snake underground. If that short route is blocked by an entity,
+QuarryOS falls back to the recorded safe route.
 
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
