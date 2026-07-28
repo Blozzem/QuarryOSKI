@@ -1060,10 +1060,12 @@ local function queueFluidCheck(kind)
   local key = fluidCheckKey(targetLayer, state.x, state.z)
   if not state.fluidChecks[key] then
     state.fluidChecks[key] = { kind = kind, layer = targetLayer, x = state.x, z = state.z }
-    state.stats.fluids = state.stats.fluids + 1
+    if kind ~= "unknown" then state.stats.fluids = state.stats.fluids + 1 end
     saveState()
-    notify(kind == "lava" and "Lava found - wall check scheduled for the next layer."
-      or "Water found - wall check scheduled for the next layer.", "warning")
+    if kind == "lava" or kind == "water" then
+      notify(kind == "lava" and "Lava found - wall check scheduled for the next layer."
+        or "Water found - wall check scheduled for the next layer.", "warning")
+    end
   end
 end
 
@@ -1086,6 +1088,26 @@ local function placeFluidSeal()
   return false
 end
 
+-- A flowing liquid is sometimes reported as an empty field by the Turtle.
+-- Temporarily placing and removing a normal block forces that field to update;
+-- only a confirmed fluid is then scheduled for a wall check next layer.
+local function probeOpenFloor()
+  local selected = turtle.getSelectedSlot()
+  for slot = 1, 16 do
+    if turtle.getItemCount(slot) > 0 and isSealBlock(turtle.getItemDetail(slot)) then
+      turtle.select(slot)
+      if turtle.placeDown() then
+        local removed = turtle.digDown()
+        local _, detail = turtle.inspectDown()
+        turtle.select(selected)
+        return removed, fluidKind(detail)
+      end
+    end
+  end
+  turtle.select(selected)
+  return false
+end
+
 -- A fluid discovered in one layer is examined from the next layer down. The
 -- Turtle leaves the flowing fluid alone and only places a block into a fluid
 -- block found directly in one of the four surrounding walls.
@@ -1094,7 +1116,8 @@ local function checkFluidWalls()
   local marker = state.fluidChecks[key]
   if not marker then return true end
 
-  dashboard((marker.kind == "lava" and "Checking lava walls..." or "Checking water walls..."))
+  local label = marker.kind == "lava" and "lava" or (marker.kind == "water" and "water" or "fluid")
+  dashboard("Checking " .. label .. " walls...")
   local originalHeading = state.heading
   local sealed = 0
   for direction = 0, 3 do
@@ -1118,14 +1141,25 @@ local function checkFluidWalls()
   state.fluidChecks[key] = nil
   saveState()
   if sealed > 0 then
-    notify((marker.kind == "lava" and "Lava" or "Water") .. " wall sealed with " .. sealed .. " block(s).", "warning")
+    if marker.kind == "unknown" then state.stats.fluids = state.stats.fluids + 1 end
+    notify((marker.kind == "lava" and "Lava" or (marker.kind == "water" and "Water" or "Fluid"))
+      .. " wall sealed with " .. sealed .. " block(s).", "warning")
   end
   return true
 end
 
 local function mineCurrentCell()
   local hasBlock, detail = turtle.inspectDown()
-  if not hasBlock then return true end
+  if not hasBlock then
+    local probed, probeFluid = probeOpenFloor()
+    if not probed then
+      dashboard("Need Cobblestone/Stone for the liquid probe...")
+      notify("Open field found, but the Turtle has no block for the liquid probe. Paused at service.", "warning")
+      return false, "fluid"
+    end
+    if probeFluid then queueFluidCheck(probeFluid) end
+    return true
+  end
   if isBedrock(detail) then
     state.bedrockFound = true
     return true
@@ -1134,9 +1168,21 @@ local function mineCurrentCell()
   local dug, reason = turtle.digDown()
   if dug then
     state.stats.blocks = state.stats.blocks + 1
-    local _, afterDigDetail = turtle.inspectDown()
+    local hasAfterDig, afterDigDetail = turtle.inspectDown()
     local discoveredFluid = fluidKind(afterDigDetail) or initialFluid
-    if discoveredFluid then queueFluidCheck(discoveredFluid) end
+    if discoveredFluid then
+      queueFluidCheck(discoveredFluid)
+    elseif not hasAfterDig then
+      -- A temporary block makes an otherwise invisible flow update before the
+      -- same position is inspected from the next layer.
+      local probed, probeFluid = probeOpenFloor()
+      if not probed then
+        dashboard("Need Cobblestone/Stone for the liquid probe...")
+        notify("The Turtle has no block for the liquid probe. Paused at service.", "warning")
+        return false, "fluid"
+      end
+      if probeFluid then queueFluidCheck(probeFluid) end
+    end
     return true
   end
   if initialFluid then
@@ -1198,7 +1244,8 @@ local function mineLayer()
     end
 
     dashboard("Mining layer " .. state.layer .. "...")
-    if not mineCurrentCell() then return false, "blocked" end
+    local mined, mineReason = mineCurrentCell()
+    if not mined then return false, mineReason or "blocked" end
 
     state.layerProgress = state.layerProgress + 1
     recordProgressTiming()
