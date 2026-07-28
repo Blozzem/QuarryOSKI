@@ -1147,9 +1147,14 @@ local function placeFluidSeal()
 end
 
 -- A flowing liquid is sometimes reported as an empty field by the Turtle.
--- Temporarily placing and removing a normal block forces that field to update;
--- only a confirmed fluid is then scheduled for a wall check next layer.
+-- First inspect normally: when Lava/Water is already visible, never place a
+-- test block into it. Only an apparently empty field gets the temporary-block
+-- refresh needed to make certain flowing liquids visible.
 local function probeOpenFloor()
+  local _, beforeDetail = turtle.inspectDown()
+  local visibleFluid = fluidKind(beforeDetail)
+  if visibleFluid then return true, visibleFluid end
+
   local selected = turtle.getSelectedSlot()
   for slot = 1, 16 do
     if turtle.getItemCount(slot) > 0 and isSealBlock(turtle.getItemDetail(slot)) then
