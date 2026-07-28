@@ -47,7 +47,8 @@ for source, destination in pairs(files) do
   local url = ("https://raw.githubusercontent.com/%s/%s/%s/%s")
     :format(owner, repository, branch, source)
   write("Downloading " .. source .. "... ")
-  local ok, message = shell.run("wget", "-f", url, destination)
+  if fs.exists(destination) then fs.delete(destination) end
+  local ok, message = shell.run("wget", url, destination)
   if not ok then
     printError("failed")
     printError(message or "Could not download QuarryOS.")
