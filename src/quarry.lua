@@ -1216,27 +1216,34 @@ local function placeFluidSeal()
   return false
 end
 
--- When Lava is visible below, briefly place and mine a normal block in that
--- field. This refreshes the liquid field before the next-layer wall check.
--- Nothing is placed into air or water.
-local function probeOpenFloor()
-  local _, beforeDetail = turtle.inspectDown()
-  local visibleFluid = fluidKind(beforeDetail)
-  if visibleFluid ~= "lava" then return true, visibleFluid end
+-- Only a real Lava source (level 0) receives the temporary block test. A
+-- flowing Lava field is recorded for the next layer but is never built into.
+local function probeOpenFloor(detail)
+  local visibleFluid, isSource = isFluidSource(detail)
+  if visibleFluid ~= "lava" or not isSource then return true, visibleFluid end
 
   local selected = turtle.getSelectedSlot()
   for slot = 1, 16 do
     if turtle.getItemCount(slot) > 0 and isSealBlock(turtle.getItemDetail(slot)) then
       turtle.select(slot)
       if turtle.placeDown() then
-        turtle.digDown()
+        local removed = turtle.digDown()
         turtle.select(selected)
-        return true, "lava"
+        if removed then return true, "lava" end
+        return false, "lava"
       end
     end
   end
   turtle.select(selected)
   return false
+end
+
+-- Keep all fluid handling on one route. This prevents a visible Lava source
+-- from bypassing the test while ensuring a flowing Lava field is never filled.
+local function handleFluidBelow(detail)
+  local kind, isSource = isFluidSource(detail)
+  if kind == "lava" and isSource then return probeOpenFloor(detail) end
+  return true, kind
 end
 
 -- A fluid discovered in one layer is examined from the next layer down. The
@@ -1285,10 +1292,10 @@ end
 local function mineCurrentCell()
   local hasBlock, detail = turtle.inspectDown()
   if not hasBlock then
-    local probed, probeFluid = probeOpenFloor()
+    local probed, probeFluid = handleFluidBelow(detail)
     if not probed then
-      dashboard("Need Cobblestone/Stone for the liquid probe...")
-      notify("Open field found, but the Turtle has no block for the liquid probe. Paused at service.", "warning")
+      dashboard("Need Cobblestone/Stone for the Lava source check...")
+      notify("Lava source found, but the Turtle has no block for its safe check. Paused at service.", "warning")
       return false, "fluid"
     end
     if probeFluid then queueFluidCheck(probeFluid) end
@@ -1299,32 +1306,33 @@ local function mineCurrentCell()
     return true
   end
   local initialFluid = fluidKind(detail)
+  if initialFluid then
+    local probed, probeFluid = handleFluidBelow(detail)
+    if not probed then
+      dashboard("Need Cobblestone/Stone for the Lava source check...")
+      notify("Lava source found, but the Turtle has no block for its safe check. Paused at service.", "warning")
+      return false, "fluid"
+    end
+    if probeFluid then queueFluidCheck(probeFluid) end
+    return true
+  end
   local dug, reason = turtle.digDown()
   if dug then
     state.stats.blocks = state.stats.blocks + 1
     local hasAfterDig, afterDigDetail = turtle.inspectDown()
-    local discoveredFluid = fluidKind(afterDigDetail) or initialFluid
+    local discoveredFluid = fluidKind(afterDigDetail)
     if discoveredFluid then
-      queueFluidCheck(discoveredFluid)
-    elseif not hasAfterDig then
-      -- A temporary block makes an otherwise invisible flow update before the
-      -- same position is inspected from the next layer.
-      local probed, probeFluid = probeOpenFloor()
+      local probed, probeFluid = handleFluidBelow(afterDigDetail)
       if not probed then
-        dashboard("Need Cobblestone/Stone for the liquid probe...")
-        notify("The Turtle has no block for the liquid probe. Paused at service.", "warning")
+        dashboard("Need Cobblestone/Stone for the Lava source check...")
+        notify("Lava source found, but the Turtle has no block for its safe check. Paused at service.", "warning")
         return false, "fluid"
       end
       if probeFluid then queueFluidCheck(probeFluid) end
+    elseif not hasAfterDig then
+      -- Air needs no temporary block. If a fluid is visible, the branch above
+      -- schedules it; invisible flowing Lava is left alone rather than filled.
     end
-    return true
-  end
-  if initialFluid then
-    -- Some CC:Tweaked configurations do not remove source fluid with dig.
-    -- The next layer can still pass through it and inspect the surrounding
-    -- walls, so keep the quarry progressing instead of treating it as a tool
-    -- failure.
-    queueFluidCheck(initialFluid)
     return true
   end
   printError("Cannot mine below at " .. (detail.name or "unknown block") .. ".")
