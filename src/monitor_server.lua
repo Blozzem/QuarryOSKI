@@ -21,7 +21,7 @@ local controlNotice = nil
 -- A restrained operations-console palette: no grass/stone colours, just a
 -- dark surface, cyan information and small, purposeful warning accents.
 local THEME = {
-  background = colors.black, panel = colors.gray, accent = colors.cyan,
+  background = colors.black, panel = colors.gray, header = colors.blue, accent = colors.cyan,
   text = colors.white, muted = colors.lightGray, safe = colors.lime,
   warning = colors.orange, danger = colors.red, alert = colors.purple,
 }
@@ -98,7 +98,7 @@ end
 local function beginFrame(title)
   monitor.setBackgroundColor(THEME.background)
   monitor.clear()
-  monitor.setBackgroundColor(THEME.panel)
+  monitor.setBackgroundColor(THEME.header)
   monitor.setTextColor(THEME.accent)
   monitor.setCursorPos(1, 1)
   monitor.write(string.rep(" ", screenWidth))
@@ -107,6 +107,36 @@ local function beginFrame(title)
   monitor.setTextColor(THEME.muted)
   monitor.setCursorPos(1, 2)
   monitor.write(string.rep("-", screenWidth))
+end
+
+local function fillRect(x, y, width, height, background)
+  if width <= 0 or height <= 0 then return end
+  local left = math.max(1, x)
+  local right = math.min(screenWidth, x + width - 1)
+  if left > right then return end
+  monitor.setBackgroundColor(background)
+  for row = math.max(1, y), math.min(screenHeight, y + height - 1) do
+    monitor.setCursorPos(left, row)
+    monitor.write(string.rep(" ", right - left + 1))
+  end
+  monitor.setBackgroundColor(THEME.background)
+end
+
+local function writeOn(x, y, value, foreground, background)
+  if y < 1 or y > screenHeight or x > screenWidth then return end
+  local available = screenWidth - x + 1
+  if available <= 0 then return end
+  monitor.setCursorPos(math.max(1, x), y)
+  monitor.setBackgroundColor(background or THEME.background)
+  monitor.setTextColor(foreground or THEME.text)
+  monitor.write(clip(value, available))
+  monitor.setBackgroundColor(THEME.background)
+end
+
+local function drawCard(x, y, width, height, title, titleColour)
+  fillRect(x, y, width, height, THEME.panel)
+  fillRect(x, y, width, 1, THEME.header)
+  if title then writeOn(x + 1, y, title, titleColour or THEME.accent, THEME.header) end
 end
 
 local function addTarget(left, top, right, bottom, action)
@@ -239,12 +269,14 @@ local function drawDetailCompact(entry)
   local data = entry.data
   beginFrame("QUARRYOS // CONTROL")
   addTarget(1, 1, screenWidth, 1, "overview")
-  writeAt(1, 3, "UNIT  " .. turtleName(selectedTurtleId, entry), THEME.text)
-  writeAt(1, 4, "[" .. progressBar(data, 12) .. "] " .. progressText(data, false), THEME.accent)
-  writeAt(1, 5, etaText(data, false) .. "  //  LAYER " .. textOf(data.layer), THEME.muted)
-  writeAt(1, 6, fuelText(data, false), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and THEME.danger or THEME.safe)
-  writeAt(1, 7, "AREA " .. textOf(data.width) .. "x" .. textOf(data.length) .. "  BLOCKS " .. textOf(data.blocks), THEME.muted)
-  writeAt(1, 8, statusText(data), statusColour(data))
+  drawCard(1, 3, screenWidth, 3, " ACTIVE UNIT", THEME.accent)
+  writeOn(2, 4, turtleName(selectedTurtleId, entry) .. "  //  L" .. textOf(data.layer), THEME.text, THEME.panel)
+  writeOn(2, 5, "[" .. progressBar(data, math.max(6, screenWidth - 13)) .. "] " .. progressText(data, true), THEME.accent, THEME.panel)
+  drawCard(1, 6, screenWidth, 2, " LIVE METRICS", THEME.accent)
+  writeOn(2, 7, fuelText(data, true) .. "  " .. etaText(data, true),
+    tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and THEME.danger or THEME.safe, THEME.panel)
+  fillRect(1, 8, screenWidth, 1, THEME.panel)
+  writeOn(2, 8, statusText(data), statusColour(data), THEME.panel)
   drawButton(1, 9, 5, "SVC", THEME.danger, "service_pause")
   drawButton(7, 9, 6, "STOP", THEME.warning, "stop_after_layer")
   drawButton(14, 9, 6, "FUEL", THEME.accent, "fuel_check")
