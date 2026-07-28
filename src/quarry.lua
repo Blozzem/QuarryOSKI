@@ -1050,6 +1050,16 @@ local function fluidKind(detail)
   return nil
 end
 
+-- Minecraft fluid source blocks have level 0. Levels above 0 are flowing or
+-- falling liquid and must be left alone: only closing a real source prevents
+-- the flow from immediately reappearing elsewhere.
+local function isFluidSource(detail)
+  local kind = fluidKind(detail)
+  if not kind then return nil, false end
+  local level = detail.state and tonumber(detail.state.level)
+  return kind, level == 0
+end
+
 local function fluidCheckKey(layer, x, z)
   return tostring(layer) .. ":" .. tostring(x) .. ":" .. tostring(z)
 end
@@ -1127,7 +1137,9 @@ local function checkFluidWalls()
     end
     if not face(direction) then return false, "blocked" end
     local hasBlock, detail = turtle.inspect()
-    if hasBlock and fluidKind(detail) then
+    local wallFluid, wallIsSource
+    if hasBlock then wallFluid, wallIsSource = isFluidSource(detail) end
+    if wallFluid and wallIsSource then
       if not placeFluidSeal() then
         face(originalHeading)
         dashboard("Need Cobblestone/Stone to seal a fluid wall...")

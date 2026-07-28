@@ -86,8 +86,8 @@ only then descends.
 After opening a field, the Turtle briefly places and removes a normal block
 below itself, then checks again for water or lava. A confirmed fluid position
 is recorded. In the following layer it passes through the flow, checks the
-four surrounding walls and only seals liquid found in a wall. Flowing liquid
-itself is left alone, so the actual entry point is closed instead. QuarryOS
+four surrounding walls and only seals a source block (`level = 0`) found in a
+wall. Flowing liquid itself is left alone, so the actual entry point is closed instead. QuarryOS
 keeps one stack of common building blocks (Cobblestone, Stone, Deepslate, Dirt
 and similar blocks) in the Turtle as a sealing reserve. If none is available
 when a wall must be sealed, it returns to service and pauses safely; add a
