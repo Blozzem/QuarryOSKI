@@ -66,7 +66,9 @@ layer, or when a service pause is requested. There it sorts items into the
 output chests, refuels and continues. Progress survives restarts. In bedrock
 mode it finishes the complete first layer where bedrock is encountered, which
 keeps the quarry floor level and safe. Use `stats` to view statistics for the
-last completed quarry.
+last completed quarry. The Turtle screen and live monitor show percentage and
+an estimated remaining time. Custom fixed-depth plans are exact; bedrock plans
+use the usual Overworld bedrock level as a clearly marked approximation.
 
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for

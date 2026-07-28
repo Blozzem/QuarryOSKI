@@ -1,8 +1,8 @@
 # QuarryOS live monitor
 
 QuarryOS sends live status by Ender Modem to a base computer. The base computer
-draws the selected area, current column and depth, fuel, mined blocks and the
-current task on an Advanced Monitor.
+draws the selected area, current column and depth, fuel, mined blocks, current
+task, percentage and estimated remaining time on an Advanced Monitor.
 
 ## Wiring
 
@@ -29,6 +29,11 @@ scale 0.5 instead of cutting off long lines. A correctly connected 3x3 or 5x5
 monitor has more room and therefore receives a larger scale automatically. The
 server also recalculates after a monitor is resized; its computer console prints
 the detected layout, scale and character size for troubleshooting.
+
+For a plan with a selected depth, the percentage and ETA are calculated from
+that exact depth. A `0 = bedrock` plan has no known final depth, so QuarryOS
+marks these values with `~`: they are a useful estimate based on the usual
+Overworld bedrock level and the Turtle's measured mining speed.
 
 For a multi-block monitor, place all monitor blocks as one continuous
 rectangle with the same facing and orientation. Otherwise CC:Tweaked treats

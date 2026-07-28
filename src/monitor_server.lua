@@ -156,16 +156,46 @@ local function stepLine(data, short)
   return (short and "S " or "Step: ") .. textOf(data.positionStep) .. "/" .. textOf(data.progressStep)
 end
 
+local function durationText(milliseconds, short)
+  local seconds = math.max(0, math.ceil(milliseconds / 1000))
+  if seconds < 60 then return short and "<1m" or "<1 min" end
+  local minutes = math.floor(seconds / 60)
+  if minutes < 60 then return tostring(minutes) .. (short and "m" or " min") end
+  local hours = math.floor(minutes / 60)
+  minutes = minutes % 60
+  if hours < 24 then return tostring(hours) .. "h" .. string.format("%02d", minutes) .. "m" end
+  local days = math.floor(hours / 24)
+  hours = hours % 24
+  return tostring(days) .. "d" .. tostring(hours) .. "h"
+end
+
+local function progressLine(data, short)
+  local percentage = tonumber(data.progressPercent)
+  if not percentage then return stepLine(data, short) or (short and "P calculating" or "Progress: calculating...") end
+  local prefix = data.progressEstimated and "~" or ""
+  local cells = not data.progressEstimated and data.completedCells ~= nil and data.plannedCells ~= nil
+    and (textOf(data.completedCells) .. "/" .. textOf(data.plannedCells)) or nil
+  if short then
+    return "P " .. prefix .. tostring(math.floor(percentage)) .. "%" .. (cells and (" " .. cells) or "")
+  end
+  return "Progress: " .. prefix .. tostring(math.floor(percentage)) .. "%" .. (cells and (" " .. cells) or "")
+end
+
+local function etaLine(data, short)
+  local milliseconds = tonumber(data.estimatedRemainingMs)
+  if not milliseconds then return short and "E calculating" or "ETA: calculating..." end
+  local prefix = data.progressEstimated and "~" or ""
+  return (short and "E " or "ETA: ") .. prefix .. durationText(milliseconds, short)
+end
+
 local function drawCompact(data)
   beginFrame("QUARRYOS LIVE")
   writeAt(1, 3, "Area: " .. textOf(data.width) .. "x" .. textOf(data.length), colors.cyan)
   writeAt(1, 4, "X " .. fraction(data.columnX, data.width) .. " Z " .. fraction(data.columnZ, data.length), colors.lightGray)
   writeAt(1, 5, depthLine(data, false), colors.lightGray)
-
-  local step = stepLine(data, false)
-  if step then writeAt(1, 6, step, colors.lightGray) end
-  writeAt(1, 7, "Fuel: " .. textOf(data.fuel), colors.lime)
-  writeAt(1, 8, "Blocks: " .. textOf(data.blocks), colors.lightGray)
+  writeAt(1, 6, progressLine(data, false), colors.lightGray)
+  writeAt(1, 7, etaLine(data, false), colors.yellow)
+  writeAt(1, 8, "Fuel: " .. textOf(data.fuel) .. " B: " .. textOf(data.blocks), colors.lime)
   writeAt(1, 9, statusLine(data, "Working..."), colors.yellow)
   drawControlButton(10, "SERVICE & PAUSE")
 end
@@ -173,13 +203,11 @@ end
 local function drawTiny(data)
   beginFrame("QUARRYOS")
   writeAt(1, 3, "A " .. textOf(data.width) .. "x" .. textOf(data.length), colors.cyan)
-  writeAt(1, 4, "X " .. fraction(data.columnX, data.width), colors.lightGray)
-  writeAt(1, 5, "Z " .. fraction(data.columnZ, data.length), colors.lightGray)
-  writeAt(1, 6, depthLine(data, true), colors.lightGray)
-
-  local step = stepLine(data, true)
-  if step then writeAt(1, 7, step, colors.lightGray) end
-  writeAt(1, 8, "F " .. textOf(data.fuel) .. " B " .. textOf(data.blocks), colors.lime)
+  writeAt(1, 4, depthLine(data, true), colors.lightGray)
+  writeAt(1, 5, progressLine(data, true), colors.lightGray)
+  writeAt(1, 6, etaLine(data, true), colors.yellow)
+  writeAt(1, 7, "F " .. textOf(data.fuel) .. " B " .. textOf(data.blocks), colors.lime)
+  writeAt(1, 8, "X " .. fraction(data.columnX, data.width) .. " Z " .. fraction(data.columnZ, data.length), colors.lightGray)
   writeAt(1, 9, statusLine(data, "Working..."), colors.yellow)
   drawControlButton(10, "SVC & PAUSE")
 end

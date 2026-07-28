@@ -98,10 +98,19 @@ if state then
     state.layerProgress = totalCells
     state.nextCell = totalCells - 1
   end
-  state.version = math.max(2, state.version or 1)
+  state.version = math.max(3, state.version or 1)
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
+  -- Estimate the normal Overworld bedrock level for a useful *approximate*
+  -- progress display. The actual quarry still stops only when it finds
+  -- bedrock, so modded worlds and other dimensions remain safe.
+  state.estimatedLayers = state.estimatedLayers or (state.maximum == 0
+    and math.max(1, state.origin.y + 64) or state.maximum)
+  state.timing = state.timing or {}
+  state.timing.lastCompleted = state.timing.lastCompleted
+    or ((state.layer - 1) * totalCells + math.min(totalCells, state.layerProgress or 0))
+  state.timing.lastEpoch = state.timing.lastEpoch or os.epoch("utc")
 end
 
 local function saveState()
@@ -125,6 +134,74 @@ end
 local function fuelCapacity()
   local capacity = turtle.getFuelLimit()
   return capacity == "unlimited" and math.huge or capacity
+end
+
+local function completedCells()
+  local cellsPerLayer = state.width * state.length
+  return math.max(0, (math.max(1, state.layer or 1) - 1) * cellsPerLayer
+    + math.min(cellsPerLayer, math.max(0, state.layerProgress or 0)))
+end
+
+local function progressTarget()
+  local approximate = state.maximum == 0
+  local layers = approximate and state.estimatedLayers or state.maximum
+  layers = math.max(1, math.floor(tonumber(layers) or 1))
+  return state.width * state.length * layers, approximate
+end
+
+-- Keep a moving average for one mined cell. This survives restarts and gives
+-- a practical ETA; very long interruption gaps are ignored as pauses.
+local function recordProgressTiming()
+  state.timing = state.timing or {}
+  local now = os.epoch("utc")
+  local completed = completedCells()
+  local previous = tonumber(state.timing.lastCompleted) or completed
+  local previousEpoch = tonumber(state.timing.lastEpoch) or now
+  local gained = completed - previous
+  local elapsed = now - previousEpoch
+
+  if gained > 0 and elapsed >= 0 and elapsed <= 300000 * gained then
+    local sample = elapsed / gained
+    local average = tonumber(state.timing.averageCellMs)
+    state.timing.averageCellMs = average
+      and math.floor(average * 0.75 + sample * 0.25 + 0.5)
+      or math.floor(sample + 0.5)
+  end
+
+  state.timing.lastCompleted = completed
+  state.timing.lastEpoch = now
+end
+
+local function quarryProgress()
+  local plannedCells, approximate = progressTarget()
+  local completed = math.min(plannedCells, completedCells())
+  local percentage = math.floor((completed / plannedCells) * 100 + 0.5)
+  -- A bedrock plan has no fixed depth. Do not promise 100% before bedrock was
+  -- really encountered, even when the normal-world estimate is reached.
+  if approximate and state.bedrockFound then
+    percentage = 100
+  elseif approximate then
+    percentage = math.min(99, percentage)
+  end
+
+  local average = state.timing and tonumber(state.timing.averageCellMs)
+  local remaining = state.bedrockFound and 0
+    or (average and math.max(0, plannedCells - completed) * average or nil)
+  return percentage, remaining, approximate, completed, plannedCells
+end
+
+local function formatDuration(milliseconds)
+  if not milliseconds then return "calculating..." end
+  local seconds = math.max(0, math.ceil(milliseconds / 1000))
+  if seconds < 60 then return "<1 min" end
+  local minutes = math.floor(seconds / 60)
+  if minutes < 60 then return tostring(minutes) .. " min" end
+  local hours = math.floor(minutes / 60)
+  minutes = minutes % 60
+  if hours < 24 then return tostring(hours) .. "h " .. string.format("%02d", minutes) .. "m" end
+  local days = math.floor(hours / 24)
+  hours = hours % 24
+  return tostring(days) .. "d " .. tostring(hours) .. "h"
 end
 
 -- The direction check moves forward and back once. Load its two movement
@@ -177,6 +254,7 @@ monitorNetworkReady = openMonitorModems()
 
 local function broadcastMonitor(message)
   local total = state.width * state.length
+  local percentage, eta, approximate, completed, planned = quarryProgress()
   local payload = {
     jobId = state.jobId, phase = state.phase,
     width = state.width, length = state.length, maximum = state.maximum,
@@ -187,6 +265,8 @@ local function broadcastMonitor(message)
     layer = state.layer, nextCell = state.nextCell, totalCells = total,
     positionStep = state.positionStep + 1, progressStep = total,
     layerProgress = state.layerProgress,
+    progressPercent = percentage, progressEstimated = approximate,
+    estimatedRemainingMs = eta, completedCells = completed, plannedCells = planned,
     fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
   }
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
@@ -232,24 +312,35 @@ local function dashboard(message)
   write("Work depth: ")
   paint(colors.white)
   write(tostring(state.depth))
-  term.setCursorPos(2, 9)
+  term.setCursorPos(2, 7)
+  paint(colors.lightGray)
+  write("Progress: ")
+  local percentage, eta, approximate = quarryProgress()
+  paint(colors.white)
+  write((approximate and "~" or "") .. percentage .. "%")
+  term.setCursorPos(2, 8)
+  paint(colors.lightGray)
+  write("ETA: ")
+  paint(colors.white)
+  write((approximate and "~" or "") .. formatDuration(eta))
+  term.setCursorPos(2, 10)
   paint(colors.lightGray)
   write("Fuel: ")
   paint(colors.lime)
   write(tostring(fuelLevel()))
   local used = 0
   for slot = 1, 16 do if turtle.getItemCount(slot) > 0 then used = used + 1 end end
-  term.setCursorPos(2, 10)
+  term.setCursorPos(2, 11)
   paint(colors.lightGray)
   write("Inventory: ")
   paint(used == 16 and colors.red or colors.lime)
   write(used .. "/16")
-  term.setCursorPos(2, 12)
+  term.setCursorPos(2, 13)
   paint(colors.lightGray)
   write("Blocks mined: ")
   paint(colors.white)
   write(tostring(state.stats.blocks))
-  term.setCursorPos(2, 14)
+  term.setCursorPos(2, 15)
   paint(colors.yellow)
   print(message or "Working...")
   paint(colors.white)
@@ -418,7 +509,7 @@ local function setupMenu()
   write("Start this quarry? [Y/n] ")
   if read():lower() == "n" then return nil end
   return {
-    layout = stateLayout, version = 2,
+    layout = stateLayout, version = 3,
     width = width, length = length, maximum = maximum,
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
@@ -426,6 +517,8 @@ local function setupMenu()
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
     started = os.epoch("utc"), plan = choice,
+    estimatedLayers = maximum == 0 and math.max(1, originY + 64) or maximum,
+    timing = { lastCompleted = 0, lastEpoch = os.epoch("utc") },
     jobId = tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")),
   }
 end
@@ -910,6 +1003,7 @@ local function mineLayer()
     if not mineCurrentCell() then return false, "blocked" end
 
     state.layerProgress = state.layerProgress + 1
+    recordProgressTiming()
     if state.layerProgress < total then
       state.nextCell = state.nextCell + state.routeDirection
       saveState()
@@ -999,6 +1093,7 @@ local function pauseAtServiceStation()
   state.phase = "paused"
   state.pauseRequested = nil
   state.pauseRequestId = nil
+  if state.timing then state.timing.lastEpoch = nil end
   saveState()
   dashboard("Paused at service station. Unloading and refuelling...")
   local serviced = serviceChest(fuelForResume())
