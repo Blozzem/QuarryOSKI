@@ -44,6 +44,35 @@ local function fuelLevel()
   return fuel == "unlimited" and math.huge or fuel
 end
 
+-- The setup wizard has to move forward and back once to record its GPS
+-- direction. Fill those first two movement fuel points from the chest above
+-- before attempting that check, otherwise an empty turtle gives a misleading
+-- "cannot move" error even though its fuel chest is correctly placed.
+local function loadSetupFuel(required)
+  if fuelLevel() >= required then return true end
+
+  local selected = turtle.getSelectedSlot()
+  while fuelLevel() < required do
+    local freeSlot
+    for slot = 1, 16 do
+      if turtle.getItemCount(slot) == 0 then
+        freeSlot = slot
+        break
+      end
+    end
+    if not freeSlot then break end
+
+    turtle.select(freeSlot)
+    if not turtle.suckUp(1) then break end
+    if not turtle.refuel(1) then
+      turtle.dropUp()
+      break
+    end
+  end
+  turtle.select(selected)
+  return fuelLevel() >= required
+end
+
 local function paint(colour) term.setTextColor(colour) end
 
 local function broadcastMonitor(message)
@@ -198,18 +227,45 @@ local function setupMenu()
     print("GPS is required. Set up GPS host computers, then run again.")
     return nil
   end
-  if not turtle.forward() then
-    if turtle.detect() and turtle.dig() and turtle.forward() then
-      print("Mined the first quarry block for the GPS direction check.")
-    else
+  if fuelLevel() < 2 then
+    print("Loading fuel from the top chest for GPS direction check...")
+    if not loadSetupFuel(2) then
+      paint(colors.red)
+      print("Not enough usable fuel in the top fuel chest.")
+      return nil
+    end
+  end
+
+  local moved, moveReason = turtle.forward()
+  if not moved then
+    local hasBlock, detail = turtle.inspect()
+    if hasBlock then
+      local dug, digReason = turtle.dig()
+      if dug then
+        moved, moveReason = turtle.forward()
+        if moved then print("Mined the first quarry block for the GPS direction check.") end
+      else
+        paint(colors.red)
+        print("Cannot mine the block in front: " .. (detail.name or "unknown block"))
+        print(digReason or "Check the turtle tool and any claim/protection.")
+        return nil
+      end
+    end
+    if not moved then
       paint(colors.red)
       print("Cannot move forward for GPS direction check.")
-      print("Remove the block in front or equip a working pickaxe.")
+      print(moveReason or "The front may be blocked by an entity or protected area.")
       return nil
     end
   end
   local forwardX, _, forwardZ = gps.locate(5)
-  turtle.back()
+  local returned, returnReason = turtle.back()
+  if not returned then
+    paint(colors.red)
+    print("GPS check succeeded, but the turtle cannot return to its start.")
+    print(returnReason or "Clear the block or entity behind the turtle, then move it back manually.")
+    return nil
+  end
   if not forwardX then
     paint(colors.red)
     print("GPS direction check failed. Run again near GPS coverage.")
