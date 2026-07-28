@@ -18,6 +18,8 @@ computers, advanced computers, turtles and pocket computers.
 - Non-destructive installer which backs up an existing `startup` program
 - Turtle quarry program that clears full horizontal layers, auto-refuels from
   its service chest and safely returns to its starting corner
+- Live monitor control centre with alerts, fuel checks and support for several
+  independently running Turtles
 
 ## Requirements
 

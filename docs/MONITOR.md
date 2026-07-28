@@ -39,6 +39,36 @@ For a multi-block monitor, place all monitor blocks as one continuous
 rectangle with the same facing and orientation. Otherwise CC:Tweaked treats
 the pieces as separate monitors.
 
+## Several Turtles and monitor controls
+
+One monitor can track several QuarryOS Turtles at once. Touch a Turtle in the
+**TURTLES** list to select it; every command is sent directly to that selected
+Turtle, never to all of them. Give Turtles names with CC:Tweaked's normal
+`label` command to make the list easier to read.
+
+On a compact monitor, touch the blue title bar to return to the Turtle list.
+The selected Turtle has these buttons:
+
+- **SVC**: return to the service station, unload, refuel and pause.
+- **STOP**: finish the current layer, then return to the service station and
+  pause. It never interrupts a movement or mining action halfway through.
+- **FUEL**: ask the Turtle for its current fuel, safe fuel requirement and any
+  shortfall. This checks the Turtle's fuel; it does not remove fuel from the
+  chest.
+- **LIST**: choose another Turtle.
+- **ALARMS**: show the last 20 QuarryOS notifications.
+
+On a narrow 1x2 monitor, touch the title to cycle through the five buttons,
+then touch the large bottom button. This keeps every control usable on a small
+screen.
+
+## Notifications
+
+The monitor records start, service-pause, stop-after-layer and completion
+messages. Warnings and completions are also played through an attached
+CC:Tweaked Speaker when one is available. A Turtle which has not sent a status
+message for 30 seconds is displayed as **OFF** in the Turtle list.
+
 ## Service and pause from the monitor
 
 Touch the red **SERVICE & PAUSE** button on the live display. It sends a

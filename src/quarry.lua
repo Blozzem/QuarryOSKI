@@ -102,6 +102,7 @@ if state then
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
+  state.stopAfterLayerRequested = state.stopAfterLayerRequested or false
   -- Estimate the normal Overworld bedrock level for a useful *approximate*
   -- progress display. The actual quarry still stops only when it finds
   -- bedrock, so modded worlds and other dimensions remain safe.
@@ -204,6 +205,13 @@ local function formatDuration(milliseconds)
   return tostring(days) .. "d " .. tostring(hours) .. "h"
 end
 
+local function fuelRequiredForResume()
+  local workDepth = state.layer - 1
+  local total = state.width * state.length
+  local workChunk = math.min(256, math.max(0, total - (state.layerProgress or 0)))
+  return math.max(64, (workDepth + state.nextCell + workChunk + 1) * 2 + 24)
+end
+
 -- The direction check moves forward and back once. Load its two movement
 -- points from the chest above before the first movement attempt.
 local function loadSetupFuel(required)
@@ -255,8 +263,9 @@ monitorNetworkReady = openMonitorModems()
 local function broadcastMonitor(message)
   local total = state.width * state.length
   local percentage, eta, approximate, completed, planned = quarryProgress()
+  local requiredFuel = fuelRequiredForResume()
   local payload = {
-    jobId = state.jobId, phase = state.phase,
+    jobId = state.jobId, turtleName = os.getComputerLabel() or ("Turtle " .. os.getComputerID()), phase = state.phase,
     width = state.width, length = state.length, maximum = state.maximum,
     -- The work area begins one block in front of the service corner, so turn
     -- the local X coordinate back into a zero-based in-area monitor position.
@@ -267,6 +276,8 @@ local function broadcastMonitor(message)
     layerProgress = state.layerProgress,
     progressPercent = percentage, progressEstimated = approximate,
     estimatedRemainingMs = eta, completedCells = completed, plannedCells = planned,
+    fuelRequired = requiredFuel, fuelShortfall = math.max(0, requiredFuel - fuelLevel()),
+    stopAfterLayerRequested = state.stopAfterLayerRequested,
     fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
   }
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
@@ -275,9 +286,14 @@ local function broadcastMonitor(message)
   end
 end
 
-local function notify(message)
+local function notify(message, level)
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
-  if monitorNetworkReady then rednet.broadcast(message, "quarryos-notify") end
+  if monitorNetworkReady then
+    rednet.broadcast(textutils.serialize({
+      jobId = state.jobId, turtleName = os.getComputerLabel() or ("Turtle " .. os.getComputerID()),
+      message = message, level = level or "info",
+    }), "quarryos-notify")
+  end
   broadcastMonitor("NOTICE: " .. message)
 end
 
@@ -312,35 +328,35 @@ local function dashboard(message)
   write("Work depth: ")
   paint(colors.white)
   write(tostring(state.depth))
-  term.setCursorPos(2, 7)
+  term.setCursorPos(2, 8)
   paint(colors.lightGray)
   write("Progress: ")
   local percentage, eta, approximate = quarryProgress()
   paint(colors.white)
   write((approximate and "~" or "") .. percentage .. "%")
-  term.setCursorPos(2, 8)
+  term.setCursorPos(2, 9)
   paint(colors.lightGray)
   write("ETA: ")
   paint(colors.white)
   write((approximate and "~" or "") .. formatDuration(eta))
-  term.setCursorPos(2, 10)
+  term.setCursorPos(2, 11)
   paint(colors.lightGray)
   write("Fuel: ")
   paint(colors.lime)
   write(tostring(fuelLevel()))
   local used = 0
   for slot = 1, 16 do if turtle.getItemCount(slot) > 0 then used = used + 1 end end
-  term.setCursorPos(2, 11)
+  term.setCursorPos(2, 12)
   paint(colors.lightGray)
   write("Inventory: ")
   paint(used == 16 and colors.red or colors.lime)
   write(used .. "/16")
-  term.setCursorPos(2, 13)
+  term.setCursorPos(2, 14)
   paint(colors.lightGray)
   write("Blocks mined: ")
   paint(colors.white)
   write(tostring(state.stats.blocks))
-  term.setCursorPos(2, 15)
+  term.setCursorPos(2, 16)
   paint(colors.yellow)
   print(message or "Working...")
   paint(colors.white)
@@ -584,7 +600,7 @@ if not state then
   state = setupMenu()
   if not state then return end
   saveState()
-  notify("Layer quarry started: " .. state.width .. "x" .. state.length)
+  notify("Layer quarry started: " .. state.width .. "x" .. state.length, "info")
 elseif (state.phase == "surface" or resumePausedQuarry) and not preflightCheck(true) then
   paint(colors.white)
   print("Fix the service chests before resuming this quarry.")
@@ -651,6 +667,7 @@ local function moveForward(allowDig)
   end
   if not moved then
     printError("Cannot move forward: " .. (reason or "path blocked"))
+    notify("Movement blocked: " .. (reason or "path blocked"), "error")
     return false
   end
   local vector = vectors[state.heading]
@@ -683,6 +700,7 @@ local function moveDown(allowDig)
     state.pendingMove = nil
     saveState()
     printError("Cannot move down: " .. (reason or "path blocked"))
+    notify("Downward movement blocked: " .. (reason or "path blocked"), "error")
     return false
   end
   state.depth = state.depth + 1
@@ -715,6 +733,7 @@ local function moveUp(allowDig)
     state.pendingMove = nil
     saveState()
     printError("Cannot move up: " .. (reason or "path blocked"))
+    notify("Upward movement blocked: " .. (reason or "path blocked"), "error")
     return false
   end
   state.depth = state.depth - 1
@@ -790,13 +809,7 @@ local function fuelForSafeReturn(includeNextMove)
 end
 
 local function fuelForResume()
-  local workDepth = state.layer - 1
-  -- Reach the saved cell and retain enough fuel to follow the same clear path
-  -- back to the service corner after a useful chunk of layer work. This avoids
-  -- a wasteful service trip after only a handful of cells.
-  local total = state.width * state.length
-  local workChunk = math.min(256, math.max(0, total - (state.layerProgress or 0)))
-  return math.max(64, (workDepth + state.nextCell + workChunk + 1) * 2 + 24)
+  return fuelRequiredForResume()
 end
 
 local function serviceChest(requiredFuel)
@@ -957,6 +970,7 @@ local function mineCurrentCell()
   end
   printError("Cannot mine below at " .. (detail.name or "unknown block") .. ".")
   print(reason or "Check the turtle tool and claim/protection settings.")
+  notify("Mining blocked by " .. (detail.name or "unknown block") .. ".", "error")
   return false
 end
 
@@ -991,11 +1005,13 @@ local function mineLayer()
     end
     if inventoryFull() then
       dashboard("Inventory full - returning to service chests...")
+      notify("Inventory full - returning to the service station.", "warning")
       return false, "service"
     end
     local hasNextMove = state.layerProgress < total - 1
     if fuelLevel() < fuelForSafeReturn(hasNextMove) then
       dashboard("Fuel reserve reached - returning to service chests...")
+      notify("Fuel reserve reached - returning to the service station.", "warning")
       return false, "service"
     end
 
@@ -1034,7 +1050,7 @@ local function completeQuarry()
   paint(colors.lime)
   print("Layer quarry complete. All items were delivered to the service chests.")
   paint(colors.white)
-  notify("Layer quarry complete: " .. state.stats.blocks .. " blocks mined")
+  notify("Layer quarry complete: " .. state.stats.blocks .. " blocks mined", "success")
   local statsHandle = fs.open("/quarryos/quarry-last-stats", "w")
   statsHandle.write(textutils.serialize(state.stats))
   statsHandle.close()
@@ -1059,6 +1075,7 @@ end
 
 local function serviceReasonAtLayerBoundary()
   if state.pauseRequested then return "pause" end
+  if state.stopAfterLayerRequested then return "pause" end
   if inventoryFull() then return "service" end
   if fuelLevel() < fuelForSafeReturn(true) then return "service" end
   return nil
@@ -1093,6 +1110,7 @@ local function pauseAtServiceStation()
   state.phase = "paused"
   state.pauseRequested = nil
   state.pauseRequestId = nil
+  state.stopAfterLayerRequested = nil
   if state.timing then state.timing.lastEpoch = nil end
   saveState()
   dashboard("Paused at service station. Unloading and refuelling...")
@@ -1102,7 +1120,7 @@ local function pauseAtServiceStation()
   else
     dashboard("Paused at service station. Fix service chests/fuel, then run 'q'.")
   end
-  notify("Quarry paused at the service station. Run q on the turtle to continue.")
+  notify("Quarry paused at the service station. Run q on the turtle to continue.", "warning")
   return false
 end
 
@@ -1116,10 +1134,10 @@ local function handleCompletedLayer()
       return pauseAtServiceStation()
     end
     if not atServiceStation() and not returnToBase() then return false end
-    if state.pauseRequested then return pauseAtServiceStation() end
+    if state.pauseRequested or state.stopAfterLayerRequested then return pauseAtServiceStation() end
     dashboard(state.bedrockFound and "Bedrock layer reached - final service..." or "Final service visit...")
     if not serviceChest(0) then return false end
-    if state.pauseRequested then return pauseAtServiceStation() end
+    if state.pauseRequested or state.stopAfterLayerRequested then return pauseAtServiceStation() end
     completeQuarry()
     return false
   end
@@ -1132,7 +1150,7 @@ local function handleCompletedLayer()
     if state.pauseRequested then return pauseAtServiceStation() end
   end
 
-  if state.pauseRequested then
+  if state.pauseRequested or state.stopAfterLayerRequested then
     if not atServiceStation() and not returnToBase() then return false end
     return pauseAtServiceStation()
   end
@@ -1151,12 +1169,16 @@ local function decodeControl(message)
   return ok and command or nil
 end
 
-local function acknowledgeControl(sender, command, status)
+local function acknowledgeControl(sender, command, status, extra)
   if not sender then return end
-  rednet.send(sender, textutils.serialize({
-    command = "service_pause_ack", jobId = state.jobId,
+  local response = {
+    command = command.command .. "_ack", jobId = state.jobId,
     requestId = command.requestId, status = status,
-  }), "quarryos-control-ack")
+  }
+  if extra then
+    for key, value in pairs(extra) do response[key] = value end
+  end
+  rednet.send(sender, textutils.serialize(response), "quarryos-control-ack")
 end
 
 -- The listener runs beside the mining loop. It only records a request; the
@@ -1165,19 +1187,38 @@ local function controlListener()
   while true do
     local sender, message = rednet.receive("quarryos-control")
     local command = decodeControl(message)
-    if command and command.command == "service_pause" and command.jobId == state.jobId then
-      if state.phase == "paused" then
-        acknowledgeControl(sender, command, "paused")
-      elseif state.pauseRequested then
-        -- A monitor may retry the same direct message when its ACK was lost.
-        -- The desired state is already saved, so just acknowledge it again.
-        acknowledgeControl(sender, command, "accepted")
-      else
-        state.pauseRequested = true
-        state.pauseRequestId = command.requestId
-        saveState()
-        acknowledgeControl(sender, command, "accepted")
-        notify("Service & pause requested from the monitor.")
+    if command and command.jobId == state.jobId then
+      if command.command == "service_pause" then
+        if state.phase == "paused" then
+          acknowledgeControl(sender, command, "paused")
+        elseif state.pauseRequested then
+          -- A monitor may retry the same direct message when its ACK was lost.
+          -- The desired state is already saved, so just acknowledge it again.
+          acknowledgeControl(sender, command, "accepted")
+        else
+          state.pauseRequested = true
+          state.pauseRequestId = command.requestId
+          saveState()
+          acknowledgeControl(sender, command, "accepted")
+          notify("Service & pause requested from the monitor.", "warning")
+        end
+      elseif command.command == "stop_after_layer" then
+        if state.phase == "paused" then
+          acknowledgeControl(sender, command, "paused")
+        elseif state.stopAfterLayerRequested then
+          acknowledgeControl(sender, command, "accepted")
+        else
+          state.stopAfterLayerRequested = true
+          saveState()
+          acknowledgeControl(sender, command, "accepted")
+          notify("Stop after the current layer requested from the monitor.", "warning")
+        end
+      elseif command.command == "fuel_check" then
+        local required = fuelRequiredForResume()
+        acknowledgeControl(sender, command, "reported", {
+          fuel = fuelLevel(), requiredFuel = required,
+          fuelShortfall = math.max(0, required - fuelLevel()),
+        })
       end
     end
   end

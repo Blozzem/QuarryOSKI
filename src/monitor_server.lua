@@ -1,27 +1,31 @@
--- QuarryOS base monitor server. Run this on a base computer with an Advanced
--- Monitor and an Ender Modem. It receives live updates from the turtle.
+-- QuarryOS base monitor server. It tracks several turtles and sends direct,
+-- acknowledged commands only to the selected turtle.
 local monitor = peripheral.find("monitor")
 if not monitor then error("Attach an Advanced Monitor to this computer.", 0) end
 
 local monitorName = peripheral.getName and peripheral.getName(monitor) or nil
+local speaker = peripheral.find("speaker")
 local screenWidth, screenHeight = monitor.getSize()
 local textScale = monitor.getTextScale and monitor.getTextScale() or nil
 local layout = "tiny"
-local lastData = nil
-local lastTurtleId = nil
-local controlNotice = nil
-local controlButton = nil
+local turtles = {}
+local selectedTurtleId = nil
+local view = "overview"
+local tinyPage = 1
+local touchTargets = {}
+local alerts = {}
 local requestNumber = 0
-local pendingRequestId = nil
-local pendingJobId = nil
-local pendingTurtleId = nil
-local pendingControl = nil
+local pending = nil
+local controlNotice = nil
 
 -- A 26-character threshold selects scale 1.0 on a normal 3x3 monitor and
--- scale 1.5 on a normal 5x5 monitor. Narrow monitors use the tiny layout
--- instead, rather than clipping the normal dashboard.
+-- scale 1.5 on a normal 5x5 monitor. Narrow monitors use the tiny layout.
 local COMPACT_WIDTH, COMPACT_HEIGHT = 26, 10
 local TINY_WIDTH, TINY_HEIGHT = 14, 10
+
+local function now()
+  return os.epoch and os.epoch("utc") or math.floor(os.clock() * 1000)
+end
 
 local function fits(width, height, neededWidth, neededHeight)
   return width >= neededWidth and height >= neededHeight
@@ -39,9 +43,7 @@ local function largestScaleFor(neededWidth, neededHeight)
   for scale = 5, 0.5, -0.5 do
     monitor.setTextScale(scale)
     local width, height = monitor.getSize()
-    if fits(width, height, neededWidth, neededHeight) then
-      return scale, width, height
-    end
+    if fits(width, height, neededWidth, neededHeight) then return scale, width, height end
   end
   return nil
 end
@@ -54,18 +56,13 @@ local function configureDisplay()
     scale, width, height = largestScaleFor(TINY_WIDTH, TINY_HEIGHT)
     layout = "tiny"
   end
-
-  -- Every standard monitor supports the tiny layout at scale 0.5. Keep a
-  -- defensive fallback in case a server changes monitor terminal sizes.
   if not scale then
     if monitor.setTextScale then monitor.setTextScale(0.5) end
     scale = monitor.getTextScale and monitor.getTextScale() or 0.5
     width, height = monitor.getSize()
     layout = "tiny"
   end
-
-  textScale = scale
-  screenWidth, screenHeight = width, height
+  textScale, screenWidth, screenHeight = scale, width, height
 end
 
 local function clip(value, maximum)
@@ -87,8 +84,7 @@ end
 
 local function centerAt(y, value, colour)
   local text = clip(value, screenWidth)
-  local x = math.max(1, math.floor((screenWidth - #text) / 2) + 1)
-  writeAt(x, y, text, colour)
+  writeAt(math.max(1, math.floor((screenWidth - #text) / 2) + 1), y, text, colour)
 end
 
 local function beginFrame(title)
@@ -102,58 +98,34 @@ local function beginFrame(title)
   monitor.setBackgroundColor(colors.black)
 end
 
-local function drawControlButton(y, label)
-  local text = " " .. label .. " "
-  text = clip(text, screenWidth)
-  local x = math.max(1, math.floor((screenWidth - #text) / 2) + 1)
+local function addTarget(left, top, right, bottom, action)
+  touchTargets[#touchTargets + 1] = {
+    left = left, top = top, right = right, bottom = bottom, action = action,
+  }
+end
 
+local function drawButton(x, y, width, label, background, action)
+  if y < 1 or y > screenHeight or x > screenWidth or width <= 0 then return end
+  width = math.min(width, screenWidth - x + 1)
+  local text = " " .. clip(label, math.max(1, width - 2)) .. " "
+  text = clip(text, width)
   monitor.setCursorPos(x, y)
-  monitor.setBackgroundColor(colors.red)
+  monitor.setBackgroundColor(background)
   monitor.setTextColor(colors.white)
-  monitor.write(text)
+  monitor.write(text .. string.rep(" ", math.max(0, width - #text)))
   monitor.setBackgroundColor(colors.black)
-
-  controlButton = { left = x, right = x + #text - 1, top = y, bottom = y }
+  addTarget(x, y, x + width - 1, y, action)
 end
 
-local function textOf(input, fallback)
-  if input == nil then return fallback or "?" end
-  return tostring(input)
+local function drawCenteredButton(y, label, background, action)
+  local width = math.min(screenWidth, #label + 2)
+  local x = math.max(1, math.floor((screenWidth - width) / 2) + 1)
+  drawButton(x, y, width, label, background, action)
 end
 
-local function nextRequestId()
-  requestNumber = requestNumber + 1
-  local timestamp = os.epoch and os.epoch("utc") or math.floor(os.clock() * 1000)
-  return "monitor-" .. tostring(os.getComputerID()) .. "-" .. tostring(timestamp) .. "-" .. tostring(requestNumber)
-end
-
-local function statusLine(data, fallback)
-  return controlNotice or textOf(data.message, fallback)
-end
-
-local function oneBased(input)
-  local number = tonumber(input)
-  if number then return tostring(math.floor(number) + 1) end
-  return textOf(input)
-end
-
-local function fraction(index, maximum)
-  return oneBased(index) .. "/" .. textOf(maximum)
-end
-
-local function depthLine(data, short)
-  if data.layer ~= nil then
-    return (short and "L " or "Layer: ") .. textOf(data.layer)
-  end
-  return (short and "D " or "Depth: ") .. textOf(data.current) .. "/" .. textOf(data.mined)
-end
-
-local function stepLine(data, short)
-  if data.layerProgress ~= nil and data.totalCells ~= nil then
-    return (short and "Done " or "Done: ") .. textOf(data.layerProgress) .. "/" .. textOf(data.totalCells)
-  end
-  if data.positionStep == nil and data.progressStep == nil then return nil end
-  return (short and "S " or "Step: ") .. textOf(data.positionStep) .. "/" .. textOf(data.progressStep)
+local function textOf(value, fallback)
+  if value == nil then return fallback or "?" end
+  return tostring(value)
 end
 
 local function durationText(milliseconds, short)
@@ -164,80 +136,220 @@ local function durationText(milliseconds, short)
   local hours = math.floor(minutes / 60)
   minutes = minutes % 60
   if hours < 24 then return tostring(hours) .. "h" .. string.format("%02d", minutes) .. "m" end
-  local days = math.floor(hours / 24)
-  hours = hours % 24
-  return tostring(days) .. "d" .. tostring(hours) .. "h"
+  return tostring(math.floor(hours / 24)) .. "d" .. tostring(hours % 24) .. "h"
 end
 
-local function progressLine(data, short)
+local function progressText(data, short)
   local percentage = tonumber(data.progressPercent)
-  if not percentage then return stepLine(data, short) or (short and "P calculating" or "Progress: calculating...") end
+  if not percentage then return short and "P calculating" or "Progress: calculating..." end
   local prefix = data.progressEstimated and "~" or ""
-  local cells = not data.progressEstimated and data.completedCells ~= nil and data.plannedCells ~= nil
-    and (textOf(data.completedCells) .. "/" .. textOf(data.plannedCells)) or nil
-  if short then
-    return "P " .. prefix .. tostring(math.floor(percentage)) .. "%" .. (cells and (" " .. cells) or "")
-  end
-  return "Progress: " .. prefix .. tostring(math.floor(percentage)) .. "%" .. (cells and (" " .. cells) or "")
+  return (short and "P " or "Progress: ") .. prefix .. tostring(math.floor(percentage)) .. "%"
 end
 
-local function etaLine(data, short)
+local function etaText(data, short)
   local milliseconds = tonumber(data.estimatedRemainingMs)
-  if not milliseconds then return short and "E calculating" or "ETA: calculating..." end
-  local prefix = data.progressEstimated and "~" or ""
-  return (short and "E " or "ETA: ") .. prefix .. durationText(milliseconds, short)
+  if not milliseconds then return short and "ETA calc" or "ETA: calculating..." end
+  return (short and "ETA " or "ETA: ") .. (data.progressEstimated and "~" or "")
+    .. durationText(milliseconds, short)
 end
 
-local function drawCompact(data)
-  beginFrame("QUARRYOS LIVE")
-  writeAt(1, 3, "Area: " .. textOf(data.width) .. "x" .. textOf(data.length), colors.cyan)
-  writeAt(1, 4, "X " .. fraction(data.columnX, data.width) .. " Z " .. fraction(data.columnZ, data.length), colors.lightGray)
-  writeAt(1, 5, depthLine(data, false), colors.lightGray)
-  writeAt(1, 6, progressLine(data, false), colors.lightGray)
-  writeAt(1, 7, etaLine(data, false), colors.yellow)
-  writeAt(1, 8, "Fuel: " .. textOf(data.fuel) .. " B: " .. textOf(data.blocks), colors.lime)
-  writeAt(1, 9, statusLine(data, "Working..."), colors.yellow)
-  drawControlButton(10, "SERVICE & PAUSE")
+local function turtleIds()
+  local ids = {}
+  for id in pairs(turtles) do ids[#ids + 1] = id end
+  table.sort(ids, function(a, b) return tostring(a) < tostring(b) end)
+  return ids
 end
 
-local function drawTiny(data)
-  beginFrame("QUARRYOS")
-  writeAt(1, 3, "A " .. textOf(data.width) .. "x" .. textOf(data.length), colors.cyan)
-  writeAt(1, 4, depthLine(data, true), colors.lightGray)
-  writeAt(1, 5, progressLine(data, true), colors.lightGray)
-  writeAt(1, 6, etaLine(data, true), colors.yellow)
-  writeAt(1, 7, "F " .. textOf(data.fuel) .. " B " .. textOf(data.blocks), colors.lime)
-  writeAt(1, 8, "X " .. fraction(data.columnX, data.width) .. " Z " .. fraction(data.columnZ, data.length), colors.lightGray)
-  writeAt(1, 9, statusLine(data, "Working..."), colors.yellow)
-  drawControlButton(10, "SVC & PAUSE")
+local function selected()
+  return selectedTurtleId and turtles[selectedTurtleId] or nil
 end
 
-local function draw(data)
-  if layout == "compact" then
-    drawCompact(data)
-  else
-    drawTiny(data)
+local function turtleName(id, entry)
+  local data = entry and entry.data or nil
+  return (data and data.turtleName) or ("Turtle " .. tostring(id))
+end
+
+local function isStale(entry)
+  return not entry or now() - (entry.lastSeen or 0) > 30000
+end
+
+local function nextRequestId()
+  requestNumber = requestNumber + 1
+  return "monitor-" .. tostring(os.getComputerID()) .. "-" .. tostring(now()) .. "-" .. tostring(requestNumber)
+end
+
+local function addAlert(sender, payload)
+  local entry = turtles[sender]
+  local item = {
+    sender = sender, name = payload.turtleName or turtleName(sender, entry),
+    message = payload.message or tostring(payload), level = payload.level or "info", at = now(),
+  }
+  table.insert(alerts, 1, item)
+  while #alerts > 20 do table.remove(alerts) end
+  if speaker and item.level ~= "info" then pcall(speaker.playSound, "block.note_block.pling", 1, 1) end
+  print("Quarry alert [" .. item.level .. "] " .. item.name .. ": " .. item.message)
+end
+
+local function alertColour(level)
+  if level == "success" then return colors.lime end
+  if level == "warning" then return colors.orange end
+  if level == "error" then return colors.red end
+  return colors.lightBlue
+end
+
+local function fuelText(data, short)
+  local fuel = textOf(data.fuel)
+  local required = tonumber(data.fuelRequired)
+  local missing = tonumber(data.fuelShortfall)
+  if not required then return (short and "F " or "Fuel: ") .. fuel end
+  if missing and missing > 0 then
+    return (short and "F " or "Fuel: ") .. fuel .. "/" .. required .. " -" .. missing
   end
+  return (short and "F " or "Fuel: ") .. fuel .. "/" .. required .. " OK"
 end
 
-local function drawWaiting()
-  if layout == "compact" then
-    beginFrame("QUARRYOS LIVE")
+local function statusText(data)
+  return controlNotice or textOf(data.message, "Working...")
+end
+
+local function drawDetailCompact(entry)
+  local data = entry.data
+  beginFrame("QUARRYOS | " .. turtleName(selectedTurtleId, entry))
+  addTarget(1, 1, screenWidth, 1, "overview")
+  writeAt(1, 3, "Area " .. textOf(data.width) .. "x" .. textOf(data.length) .. "  Layer " .. textOf(data.layer), colors.cyan)
+  writeAt(1, 4, progressText(data, false), colors.lightGray)
+  writeAt(1, 5, etaText(data, false), colors.yellow)
+  writeAt(1, 6, fuelText(data, false), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and colors.red or colors.lime)
+  writeAt(1, 7, "Blocks: " .. textOf(data.blocks) .. (data.stopAfterLayerRequested and "  Stop pending" or ""), colors.lightGray)
+  writeAt(1, 8, statusText(data), colors.yellow)
+  drawButton(1, 9, 5, "SVC", colors.red, "service_pause")
+  drawButton(7, 9, 6, "STOP", colors.orange, "stop_after_layer")
+  drawButton(14, 9, 6, "FUEL", colors.blue, "fuel_check")
+  drawButton(21, 9, 6, "LIST", colors.gray, "overview")
+  drawCenteredButton(10, "ALARMS " .. #alerts, colors.purple, "alerts")
+end
+
+local function drawDetailTiny(entry)
+  local data = entry.data
+  beginFrame("QOS " .. turtleName(selectedTurtleId, entry) .. " P" .. tinyPage)
+  addTarget(1, 1, screenWidth, 1, "tiny_next")
+  writeAt(1, 3, "L " .. textOf(data.layer) .. " " .. (data.stopAfterLayerRequested and "STOP" or ""), colors.cyan)
+  writeAt(1, 4, progressText(data, true), colors.lightGray)
+  writeAt(1, 5, etaText(data, true), colors.yellow)
+  writeAt(1, 6, fuelText(data, true), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and colors.red or colors.lime)
+  writeAt(1, 7, "B " .. textOf(data.blocks), colors.lightGray)
+  writeAt(1, 8, statusText(data), colors.yellow)
+  writeAt(1, 9, "Tap title: next", colors.lightGray)
+  local pages = {
+    { "SERVICE", colors.red, "service_pause" },
+    { "STOP LAYER", colors.orange, "stop_after_layer" },
+    { "FUEL CHECK", colors.blue, "fuel_check" },
+    { "TURTLES", colors.gray, "overview" },
+    { "ALARMS " .. #alerts, colors.purple, "alerts" },
+  }
+  local page = pages[tinyPage]
+  drawCenteredButton(10, page[1], page[2], page[3])
+end
+
+local function drawOverview()
+  local ids = turtleIds()
+  beginFrame("TURTLES " .. #ids)
+  if #ids == 0 then
     writeAt(1, 3, "Waiting for Turtle", colors.yellow)
-    writeAt(1, 5, "No signal received.", colors.lightGray)
-    writeAt(1, 7, "Check Ender/Wireless", colors.lightGray)
-    writeAt(1, 8, "Modems on both ends.", colors.lightGray)
-    writeAt(1, 9, controlNotice or ("Scale " .. textOf(textScale)), colors.cyan)
-    drawControlButton(10, "SERVICE & PAUSE")
+    writeAt(1, 5, "Check Ender/Wireless", colors.lightGray)
+    writeAt(1, 6, "Modems on both ends.", colors.lightGray)
   else
-    beginFrame("QUARRYOS")
-    writeAt(1, 3, "Waiting for", colors.yellow)
-    writeAt(1, 4, "Turtle", colors.yellow)
-    writeAt(1, 6, "Check modems", colors.lightGray)
-    writeAt(1, 8, "Scale " .. textOf(textScale), colors.cyan)
-    writeAt(1, 9, controlNotice or "", colors.yellow)
-    drawControlButton(10, "SVC & PAUSE")
+    local maximum = layout == "compact" and 5 or 5
+    for index = 1, math.min(#ids, maximum) do
+      local id = ids[index]
+      local entry = turtles[id]
+      local data = entry.data
+      local label = turtleName(id, entry)
+      local percent = tonumber(data.progressPercent)
+      local status = isStale(entry) and "OFF" or ((percent and math.floor(percent) .. "%") or "...")
+      local line = layout == "compact"
+        and (label .. " " .. status .. " F" .. textOf(data.fuel))
+        or (clip(label, 7) .. " " .. status)
+      local colour = isStale(entry) and colors.red or colors.white
+      writeAt(1, index + 2, line, colour)
+      addTarget(1, index + 2, screenWidth, index + 2, "select:" .. tostring(id))
+    end
+    if #ids > maximum then writeAt(1, 8, "+" .. (#ids - maximum) .. " more turtles", colors.lightGray) end
+    writeAt(1, 9, "Tap a Turtle for controls", colors.lightGray)
   end
+  drawCenteredButton(10, "ALARMS " .. #alerts, colors.purple, "alerts")
+end
+
+local function drawAlerts()
+  beginFrame("ALARMS " .. #alerts)
+  addTarget(1, 1, screenWidth, 1, "overview")
+  if #alerts == 0 then
+    writeAt(1, 4, "No alerts yet.", colors.lime)
+  else
+    for index = 1, math.min(#alerts, 6) do
+      local alert = alerts[index]
+      writeAt(1, index + 2, alert.name .. ": " .. alert.message, alertColour(alert.level))
+    end
+  end
+  drawCenteredButton(10, "BACK", colors.gray, "overview")
+end
+
+local function render()
+  touchTargets = {}
+  if view == "alerts" then
+    drawAlerts()
+    return
+  end
+  local entry = selected()
+  if view == "detail" and entry then
+    if layout == "compact" then drawDetailCompact(entry) else drawDetailTiny(entry) end
+  else
+    view = "overview"
+    drawOverview()
+  end
+end
+
+local function sendCommand(commandName)
+  if pending then
+    local sent = rednet.send(pending.turtleId, pending.serialized, "quarryos-control")
+    controlNotice = sent and "Request resent - waiting" or "Retry could not send"
+    render()
+    return
+  end
+  local entry = selected()
+  if not entry or not entry.data or not entry.data.jobId then
+    controlNotice = "No active Turtle selected"
+    render()
+    return
+  end
+  local requestId = nextRequestId()
+  local serialized = textutils.serialize({ command = commandName, jobId = entry.data.jobId, requestId = requestId })
+  local sent = rednet.send(selectedTurtleId, serialized, "quarryos-control")
+  if sent then
+    pending = { turtleId = selectedTurtleId, jobId = entry.data.jobId, requestId = requestId,
+      command = commandName, serialized = serialized }
+  end
+  controlNotice = sent and "Request sent - waiting" or "Request could not send"
+  render()
+end
+
+local function handleAction(action)
+  if action == "overview" then
+    view = "overview"
+    controlNotice = nil
+  elseif action == "alerts" then
+    view = "alerts"
+  elseif action == "tiny_next" then
+    tinyPage = tinyPage % 5 + 1
+  elseif action:sub(1, 7) == "select:" then
+    selectedTurtleId = tonumber(action:sub(8)) or action:sub(8)
+    view = "detail"
+    controlNotice = nil
+  elseif action == "service_pause" or action == "stop_after_layer" or action == "fuel_check" then
+    sendCommand(action)
+    return
+  end
+  render()
 end
 
 configureDisplay()
@@ -251,92 +363,63 @@ for _, side in ipairs(peripheral.getNames()) do
 end
 if not hasWirelessModem then error("Attach an Ender or Wireless Modem to this computer.", 0) end
 
-drawWaiting()
-print("QuarryOS monitor server ready (" .. layout .. ", text scale " .. textOf(textScale) .. ", " .. screenWidth .. "x" .. screenHeight .. ").")
-if monitorName then print("Using monitor: " .. monitorName) end
+render()
+print("QuarryOS monitor control ready (" .. layout .. ", text scale " .. textOf(textScale) .. ").")
+local refreshTimer = os.startTimer(5)
 
 while true do
   local event, first, second, third = os.pullEvent()
   if event == "rednet_message" then
-    local message, protocol = second, third
+    local sender, message, protocol = first, second, third
     if protocol == "quarryos-monitor" then
       local data = textutils.unserialize(message)
       if data then
-        controlNotice = nil
-        lastData = data
-        lastTurtleId = first
-        if pendingJobId and data.jobId ~= pendingJobId then
-          pendingRequestId = nil
-          pendingJobId = nil
-          pendingTurtleId = nil
-          pendingControl = nil
+        turtles[sender] = { data = data, lastSeen = now() }
+        if not selectedTurtleId then
+          selectedTurtleId = sender
+          view = "detail"
         end
-        draw(data)
+        if pending and sender == pending.turtleId and data.jobId ~= pending.jobId then pending = nil end
+        render()
       end
     elseif protocol == "quarryos-control-ack" then
       local ack = textutils.unserialize(message)
-      if ack and ack.command == "service_pause_ack" and first == pendingTurtleId
-        and ack.requestId == pendingRequestId and ack.jobId == pendingJobId then
-        pendingRequestId = nil
-        pendingJobId = nil
-        pendingTurtleId = nil
-        pendingControl = nil
-        controlNotice = layout == "compact" and "Request confirmed" or "REQ confirmed"
-        if lastData then draw(lastData) else drawWaiting() end
-        print("Service & pause request confirmed by Turtle " .. tostring(first) .. ".")
+      if ack and pending and sender == pending.turtleId and ack.jobId == pending.jobId
+        and ack.requestId == pending.requestId and ack.command == pending.command .. "_ack" then
+        if pending.command == "fuel_check" then
+          controlNotice = "Fuel " .. textOf(ack.fuel) .. "/" .. textOf(ack.requiredFuel)
+            .. (tonumber(ack.fuelShortfall) and ack.fuelShortfall > 0 and (" missing " .. ack.fuelShortfall) or " OK")
+        else
+          controlNotice = pending.command == "stop_after_layer" and "Stop after layer confirmed" or "Service pause confirmed"
+        end
+        pending = nil
+        render()
+        print("Monitor request confirmed by Turtle " .. tostring(sender) .. ".")
       end
     elseif protocol == "quarryos-notify" then
-      print("Quarry notification: " .. message)
+      local payload = textutils.unserialize(message)
+      if type(payload) ~= "table" then payload = { message = message, level = "info" } end
+      addAlert(sender, payload)
+      render()
     end
   elseif event == "monitor_touch" and (not monitorName or first == monitorName) then
     local x, y = second, third
-    if controlButton and x >= controlButton.left and x <= controlButton.right and y >= controlButton.top and y <= controlButton.bottom then
-      if pendingRequestId then
-        local resent = pendingTurtleId and pendingControl
-          and rednet.send(pendingTurtleId, pendingControl, "quarryos-control")
-        controlNotice = resent and (layout == "compact" and "Request resent - waiting" or "REQ resent")
-          or (layout == "compact" and "Retry could not send" or "Retry failed")
-        if lastData then draw(lastData) else drawWaiting() end
-        if resent then
-          print("Service & pause request resent to Turtle " .. tostring(pendingTurtleId) .. ".")
-        else
-          print("Could not resend the pending service & pause request.")
-        end
-      elseif not lastTurtleId or not lastData or not lastData.jobId then
-        controlNotice = layout == "compact" and "No active quarry signal" or "No quarry signal"
-        if lastData then draw(lastData) else drawWaiting() end
-        print("Cannot send service request: no active quarry status with a job ID.")
-      else
-        local requestId = nextRequestId()
-        local control = textutils.serialize({
-          command = "service_pause",
-          jobId = lastData.jobId,
-          requestId = requestId,
-        })
-        local sent = rednet.send(lastTurtleId, control, "quarryos-control")
-        if sent then
-          pendingRequestId = requestId
-          pendingJobId = lastData.jobId
-          pendingTurtleId = lastTurtleId
-          pendingControl = control
-        end
-        controlNotice = sent and (layout == "compact" and "Request sent - waiting" or "REQ sent; wait") or "Request could not send"
-        if lastData then draw(lastData) else drawWaiting() end
-        if sent then
-          print("Service & pause request sent to Turtle " .. tostring(lastTurtleId) .. ". Waiting for confirmation.")
-        else
-          print("Could not send service & pause request to Turtle " .. tostring(lastTurtleId) .. ".")
-        end
+    for index = #touchTargets, 1, -1 do
+      local target = touchTargets[index]
+      if x >= target.left and x <= target.right and y >= target.top and y <= target.bottom then
+        handleAction(target.action)
+        break
       end
     end
   elseif event == "monitor_resize" and (not monitorName or first == monitorName) then
-    -- setTextScale queues this event too. Only recalculate when the terminal
-    -- dimensions really changed, so the event does not cause a loop.
     local width, height = monitor.getSize()
     if width ~= screenWidth or height ~= screenHeight then
       configureDisplay()
-      if lastData then draw(lastData) else drawWaiting() end
-      print("Monitor resized: " .. layout .. ", text scale " .. textOf(textScale) .. ", " .. screenWidth .. "x" .. screenHeight .. ".")
+      render()
+      print("Monitor resized: " .. layout .. ", " .. screenWidth .. "x" .. screenHeight .. ".")
     end
+  elseif event == "timer" and first == refreshTimer then
+    refreshTimer = os.startTimer(5)
+    render()
   end
 end
