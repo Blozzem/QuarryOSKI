@@ -135,6 +135,9 @@ local function beginFrame(title)
 end
 
 local function fillRect(x, y, width, height, background)
+  -- A missing optional colour must never take the monitor server down. This
+  -- can happen while a freshly updated turtle sends an incomplete map frame.
+  background = background or THEME.background
   if width <= 0 or height <= 0 then return end
   local left = math.max(1, x)
   local right = math.min(screenWidth, x + width - 1)
