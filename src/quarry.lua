@@ -124,10 +124,27 @@ local function menuNumber(label, minimum, allowZero)
   end
 end
 
-local function isInventory(side)
-  if not peripheral.isPresent(side) then return false end
-  if peripheral.hasType then return peripheral.hasType(side, "inventory") end
-  return peripheral.wrap(side) ~= nil
+local function isStorageBlock(detail)
+  if not detail then return false end
+  local name = detail.name:lower()
+  return name:find("chest") or name:find("barrel") or name:find("shulker")
+    or name:find("crate") or name:find("drawer")
+end
+
+local function storageAt(side)
+  local ok, detail
+  if side == "top" then
+    ok, detail = turtle.inspectUp()
+  elseif side == "left" then
+    turtle.turnLeft()
+    ok, detail = turtle.inspect()
+    turtle.turnRight()
+  else -- right
+    turtle.turnRight()
+    ok, detail = turtle.inspect()
+    turtle.turnLeft()
+  end
+  return ok and isStorageBlock(detail)
 end
 
 local function preflightCheck(showHeader)
@@ -151,7 +168,7 @@ local function preflightCheck(showHeader)
     term.setCursorPos(2, index + 2)
     paint(colors.lightGray)
     write(check.label .. ": ")
-    if isInventory(check.side) then
+    if storageAt(check.side) then
       paint(colors.lime)
       print("OK")
     else
@@ -161,16 +178,6 @@ local function preflightCheck(showHeader)
     end
   end
 
-  if ok then
-    local fuelChest = peripheral.wrap("top")
-    local contents = fuelChest and fuelChest.list and fuelChest.list() or {}
-    if next(contents) == nil then
-      term.setCursorPos(2, 7)
-      paint(colors.red)
-      print("Fuel chest is empty. Add fuel before starting.")
-      ok = false
-    end
-  end
   paint(colors.white)
   return ok
 end
@@ -243,7 +250,7 @@ if not state then
   if not state then return end
   saveState()
   notify("Quarry started: " .. state.width .. "x" .. state.length)
-elseif not preflightCheck(true) then
+elseif state.current == 0 and state.x == 0 and state.z == 0 and not preflightCheck(true) then
   paint(colors.white)
   print("Fix the service chests before resuming this quarry.")
   return
