@@ -18,10 +18,12 @@ local requestNumber = 0
 local pending = nil
 local controlNotice = nil
 
--- A restrained operations-console palette: no grass/stone colours, just a
--- dark surface, cyan information and small, purposeful warning accents.
+-- A flat, low-noise operations overlay. Advanced Monitors have a character
+-- grid rather than true pixels, so avoiding large coloured rectangles makes
+-- the display look considerably cleaner at every monitor size.
 local THEME = {
-  background = colors.black, panel = colors.gray, header = colors.blue, accent = colors.cyan,
+  background = colors.black, panel = colors.black, header = colors.black,
+  button = colors.gray, divider = colors.gray, accent = colors.cyan,
   text = colors.white, muted = colors.lightGray, safe = colors.lime,
   warning = colors.orange, danger = colors.red, alert = colors.purple,
 }
@@ -135,8 +137,11 @@ end
 
 local function drawCard(x, y, width, height, title, titleColour)
   fillRect(x, y, width, height, THEME.panel)
-  fillRect(x, y, width, 1, THEME.header)
-  if title then writeOn(x + 1, y, title, titleColour or THEME.accent, THEME.header) end
+  if title then
+    local label = " " .. title .. " "
+    writeOn(x, y, label, titleColour or THEME.accent, THEME.header)
+    fillRect(x + #label, y, math.max(0, width - #label), 1, THEME.divider)
+  end
 end
 
 local function addTarget(left, top, right, bottom, action)
@@ -151,7 +156,7 @@ local function drawButton(x, y, width, label, foreground, action)
   local text = " " .. clip(label, math.max(1, width - 2)) .. " "
   text = clip(text, width)
   monitor.setCursorPos(x, y)
-  monitor.setBackgroundColor(THEME.panel)
+  monitor.setBackgroundColor(THEME.button)
   monitor.setTextColor(foreground or THEME.text)
   monitor.write(text .. string.rep(" ", math.max(0, width - #text)))
   monitor.setBackgroundColor(colors.black)
