@@ -1045,26 +1045,19 @@ local function serviceChest(requiredFuel)
     end
     if not fuelSlot then break end
     turtle.select(fuelSlot)
-    -- Take a full stack at once. Consume it one item at a time only until the
-    -- tank is full, then return the unused remainder to the fuel chest.
-    if not turtle.suckUp() then break end
-    if not turtle.refuel(0) then
+    -- Be explicit: CC:Tweaked pulls up to 64 items here. `refuel()` then
+    -- consumes this selected stack only until the tank is full, leaving any
+    -- unused fuel in the slot so it can go straight back into the chest.
+    if not turtle.suckUp(64) then break end
+    if not turtle.refuel() then
       turtle.dropUp()
       break
     end
-    local refuelFailed = false
-    while fuelLevel() < fuelTarget and turtle.getItemCount(fuelSlot) > 0 and attempts < 4096 do
-      if not turtle.refuel(1) then
-        refuelFailed = true
-        break
-      end
-      attempts = attempts + 1
-    end
+    attempts = attempts + 1
     if turtle.getItemCount(fuelSlot) > 0 and not turtle.dropUp() then
       printError("Fuel chest is full. The unused fuel stack could not be returned.")
       return false
     end
-    if refuelFailed then break end
   end
   if fuelLevel() < requiredFuel then
     printError("Add more usable fuel to the top fuel chest, then restart the quarry.")
