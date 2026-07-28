@@ -864,6 +864,41 @@ local function isSealBlock(detail)
   return false
 end
 
+-- Slot 16 is deliberately reserved for the Liquid Guard. Keeping the reserve
+-- in one predictable place means the Turtle can explain exactly what is
+-- missing instead of travelling into the quarry and immediately returning.
+local liquidGuardSlot = 16
+
+local function liquidGuardReady()
+  if turtle.getItemCount(liquidGuardSlot) == 0 then return false end
+  return isSealBlock(turtle.getItemDetail(liquidGuardSlot))
+end
+
+local function liquidGuardMissingMessage()
+  printError("Liquid Guard needs building blocks in slot " .. liquidGuardSlot .. ".")
+  print("Put Cobblestone, Stone, Deepslate or Dirt in turtle slot " .. liquidGuardSlot .. ".")
+  print("Or put a stack in the right normal-block chest. Keep slot " .. liquidGuardSlot .. " reserved, then run 'q'.")
+  notify("Liquid Guard needs Cobblestone/Stone in turtle slot " .. liquidGuardSlot .. ".", "warning")
+end
+
+local function loadLiquidGuardReserve()
+  if liquidGuardReady() then return true end
+  if not face(1) then return false end
+  local hasChest, detail = turtle.inspect()
+  if not hasChest or not isStorageBlock(detail) then
+    face(0)
+    return false
+  end
+  turtle.select(liquidGuardSlot)
+  turtle.suck(64)
+  if not liquidGuardReady() and turtle.getItemCount(liquidGuardSlot) > 0 then
+    -- This was an output item, not a suitable sealing block. Put it back.
+    turtle.drop()
+  end
+  face(0)
+  return liquidGuardReady()
+end
+
 local function serviceChest(requiredFuel)
   dashboard("Unloading into service chests...")
   -- The return path may leave the turtle facing back toward the quarry. The
@@ -882,7 +917,7 @@ local function serviceChest(requiredFuel)
     turtle.select(slot)
     if turtle.getItemCount(slot) > 0 then
       local detail = turtle.getItemDetail(slot)
-      if not reservedSealSlot and isSealBlock(detail) then
+      if isSealBlock(detail) and (slot == liquidGuardSlot or not reservedSealSlot) then
         -- Preserve one usable stack for the Liquid Guard instead of placing
         -- all common stone into the normal output chest.
         reservedSealSlot = slot
@@ -917,6 +952,18 @@ local function serviceChest(requiredFuel)
       if not face(0) then return false end
       end
     end
+  end
+
+  -- Older saves may still hold the reserve in a different slot. Move it to
+  -- the documented slot automatically after unloading the rest of the load.
+  if reservedSealSlot and reservedSealSlot ~= liquidGuardSlot then
+    turtle.select(reservedSealSlot)
+    if turtle.transferTo(liquidGuardSlot) then reservedSealSlot = liquidGuardSlot end
+  end
+  if not liquidGuardReady() and not loadLiquidGuardReserve() then
+    turtle.select(liquidGuardSlot)
+    liquidGuardMissingMessage()
+    return false
   end
 
   requiredFuel = requiredFuel or 0

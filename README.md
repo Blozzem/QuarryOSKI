@@ -89,9 +89,12 @@ is recorded. In the following layer it passes through the flow, checks the
 four surrounding walls and only seals a source block (`level = 0`) found in a
 wall. Flowing liquid itself is left alone, so the actual entry point is closed instead. QuarryOS
 keeps one stack of common building blocks (Cobblestone, Stone, Deepslate, Dirt
-and similar blocks) in the Turtle as a sealing reserve. If none is available
-when a wall must be sealed, it returns to service and pauses safely; add a
-suitable block to the Turtle and run `q` to continue.
+and similar blocks) in **slot 16** (the bottom-right turtle slot) as a sealing
+reserve. Fill that slot before starting; QuarryOS preserves it automatically
+when unloading. If that slot is empty, it also tries to take a stack from the
+right normal-block chest. If none is available it pauses safely at the service
+station and tells you exactly which slot to fill. Add a suitable block to slot
+16 (or the right chest) and run `q` to continue.
 
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
