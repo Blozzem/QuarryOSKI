@@ -44,13 +44,13 @@ for source, destination in pairs(files) do
   local directory = fs.getDir(destination)
   if directory ~= "" and not fs.exists(directory) then fs.makeDir(directory) end
 
-  local url = ("https://raw.githubusercontent.com/%s/%s/%s/%s")
-    :format(owner, repository, branch, source)
+  local url = "https://raw.githubusercontent.com/" .. owner .. "/" .. repository .. "/" .. branch .. "/" .. source
   write("Downloading " .. source .. "... ")
   local response, message = http.get(url)
   if not response then
     printError("failed")
     printError(message or "Could not download QuarryOS from GitHub.")
+    printError("URL: " .. url)
     return
   end
   local content = response.readAll()
