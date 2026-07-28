@@ -804,6 +804,7 @@ end
 -- the old zig-zag fallback safe after a restart.
 local function moveDirectlyTo(x, z)
   while state.x ~= x or state.z ~= z do
+    if state.pauseRequested then return false, "pause" end
     local nextX, nextZ = state.x, state.z
     if state.x < x then nextX = state.x + 1
     elseif state.x > x then nextX = state.x - 1
@@ -811,7 +812,7 @@ local function moveDirectlyTo(x, z)
     else nextZ = state.z - 1 end
 
     local step = routeStepForCell(nextX, nextZ)
-    if not step or not moveToRouteStep(step, false) then return false end
+    if not step or not moveToRouteStep(step, false) then return false, "blocked" end
   end
   return true
 end
@@ -951,12 +952,20 @@ end
 local function prepareWorkingPosition()
   if state.pauseRequested then return false, "pause" end
   local targetDepth = state.layer - 1
-  -- Walk from the protected service corner to the first work cell. This cell
-  -- is the vertical access shaft for deeper layers.
+  -- When starting from service, move across the already-clear surface first,
+  -- then descend at the saved work cell. This keeps horizontal travel away
+  -- from the underground quarry where mobs can gather.
   state.phase = "replaying"
   saveState()
   if state.positionStep < 0 then
-    if not moveToRouteStep(0) then return false, "blocked" end
+    local targetX, targetZ = cellForStep(state.nextCell)
+    local reachedDirectly, directReason = moveDirectlyTo(targetX, targetZ)
+    if not reachedDirectly then
+      if directReason == "pause" then return false, "pause" end
+      dashboard("Direct surface path blocked - using the safe route...")
+      local reached, reason = moveAlongRouteTo(state.nextCell)
+      if not reached then return false, reason or "blocked" end
+    end
     if state.pauseRequested then return false, "pause" end
   end
 
@@ -973,11 +982,13 @@ local function prepareWorkingPosition()
 
   state.phase = "replaying"
   saveState()
-  local reached, reason = moveAlongRouteTo(state.nextCell)
-  if not reached then
-    if reason == "pause" then return false, "pause" end
-    printError("Turtle cannot reach the saved layer progress safely.")
-    return false, "blocked"
+  if state.positionStep ~= state.nextCell then
+    local reached, reason = moveAlongRouteTo(state.nextCell)
+    if not reached then
+      if reason == "pause" then return false, "pause" end
+      printError("Turtle cannot reach the saved layer progress safely.")
+      return false, "blocked"
+    end
   end
   if state.pauseRequested then return false, "pause" end
   state.phase = "mining"

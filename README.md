@@ -77,6 +77,10 @@ then crosses directly to the access shaft instead of retracing the entire
 mining snake underground. If that short route is blocked by an entity,
 QuarryOS falls back to the recorded safe route.
 
+When work resumes from the service station, it uses the same safe principle in
+reverse: it travels directly across the surface to the saved work cell and
+only then descends.
+
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
 previous jobs and `selftest` to check the complete setup.
