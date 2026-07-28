@@ -144,7 +144,7 @@ local function storageAt(side)
     ok, detail = turtle.inspect()
     turtle.turnLeft()
   end
-  return ok and isStorageBlock(detail)
+  return ok and isStorageBlock(detail), detail and detail.name or "air"
 end
 
 local function preflightCheck(showHeader)
@@ -168,12 +168,13 @@ local function preflightCheck(showHeader)
     term.setCursorPos(2, index + 2)
     paint(colors.lightGray)
     write(check.label .. ": ")
-    if storageAt(check.side) then
+    local found, blockName = storageAt(check.side)
+    if found then
       paint(colors.lime)
-      print("OK")
+      print("OK (" .. blockName .. ")")
     else
       paint(colors.red)
-      print("MISSING OR NOT AN INVENTORY")
+      print("NOT STORAGE (" .. blockName .. ")")
       ok = false
     end
   end
