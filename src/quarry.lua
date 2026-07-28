@@ -910,6 +910,9 @@ end
 
 local function liquidGuardMissingMessage()
   printError("Liquid Guard needs building blocks in slot " .. liquidGuardSlot .. ".")
+  if turtle.getItemCount(liquidGuardSlot) > 0 then
+    print("Slot " .. liquidGuardSlot .. " is reserved, but its item cannot seal Lava safely.")
+  end
   print("Put Cobblestone, Stone, Deepslate or Dirt in turtle slot " .. liquidGuardSlot .. ".")
   print("Or put a stack in the right normal-block chest. Keep slot " .. liquidGuardSlot .. " reserved, then run 'q'.")
   notify("Liquid Guard needs Cobblestone/Stone in turtle slot " .. liquidGuardSlot .. ".", "warning")
@@ -917,6 +920,9 @@ end
 
 local function loadLiquidGuardReserve()
   if liquidGuardReady() then return true end
+  -- Slot 16 is a user-owned reserve. Never replace an item the player chose
+  -- to keep there merely because it is not one of the Liquid Guard blocks.
+  if turtle.getItemCount(liquidGuardSlot) > 0 then return false end
   if not face(1) then return false end
   local hasChest, detail = turtle.inspect()
   if not hasChest or not isStorageBlock(detail) then
@@ -947,13 +953,18 @@ local function serviceChest(requiredFuel)
   state.stats.services = state.stats.services + 1
   saveState()
   local reservedSealSlot = nil
+  local slot16Reserved = turtle.getItemCount(liquidGuardSlot) > 0
   for slot = 1, 16 do
     turtle.select(slot)
     if turtle.getItemCount(slot) > 0 then
       local detail = turtle.getItemDetail(slot)
-      if isSealBlock(detail) and (slot == liquidGuardSlot or not reservedSealSlot) then
-        -- Preserve one usable stack for the Liquid Guard instead of placing
-        -- all common stone into the normal output chest.
+      if slot == liquidGuardSlot and slot16Reserved then
+        -- Slot 16 is permanently reserved by the player. Do not unload it,
+        -- even when its material is not recognised by Liquid Guard yet.
+        reservedSealSlot = slot
+      elseif not slot16Reserved and isSealBlock(detail) and not reservedSealSlot then
+        -- When Slot 16 was empty, keep one suitable stack and move it there
+        -- after the rest of the inventory has been unloaded.
         reservedSealSlot = slot
       else
       local name = detail and detail.name or ""
