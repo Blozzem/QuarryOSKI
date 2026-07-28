@@ -18,6 +18,14 @@ local requestNumber = 0
 local pending = nil
 local controlNotice = nil
 
+-- A restrained operations-console palette: no grass/stone colours, just a
+-- dark surface, cyan information and small, purposeful warning accents.
+local THEME = {
+  background = colors.black, panel = colors.gray, accent = colors.cyan,
+  text = colors.white, muted = colors.lightGray, safe = colors.lime,
+  warning = colors.orange, danger = colors.red, alert = colors.purple,
+}
+
 -- A 26-character threshold selects scale 1.0 on a normal 3x3 monitor and
 -- scale 1.5 on a normal 5x5 monitor. Narrow monitors use the tiny layout.
 local COMPACT_WIDTH, COMPACT_HEIGHT = 26, 10
@@ -88,14 +96,17 @@ local function centerAt(y, value, colour)
 end
 
 local function beginFrame(title)
-  monitor.setBackgroundColor(colors.black)
+  monitor.setBackgroundColor(THEME.background)
   monitor.clear()
-  monitor.setBackgroundColor(colors.blue)
-  monitor.setTextColor(colors.white)
+  monitor.setBackgroundColor(THEME.panel)
+  monitor.setTextColor(THEME.accent)
   monitor.setCursorPos(1, 1)
   monitor.write(string.rep(" ", screenWidth))
-  centerAt(1, title, colors.white)
-  monitor.setBackgroundColor(colors.black)
+  centerAt(1, title, THEME.accent)
+  monitor.setBackgroundColor(THEME.background)
+  monitor.setTextColor(THEME.muted)
+  monitor.setCursorPos(1, 2)
+  monitor.write(string.rep("-", screenWidth))
 end
 
 local function addTarget(left, top, right, bottom, action)
@@ -104,23 +115,23 @@ local function addTarget(left, top, right, bottom, action)
   }
 end
 
-local function drawButton(x, y, width, label, background, action)
+local function drawButton(x, y, width, label, foreground, action)
   if y < 1 or y > screenHeight or x > screenWidth or width <= 0 then return end
   width = math.min(width, screenWidth - x + 1)
   local text = " " .. clip(label, math.max(1, width - 2)) .. " "
   text = clip(text, width)
   monitor.setCursorPos(x, y)
-  monitor.setBackgroundColor(background)
-  monitor.setTextColor(colors.white)
+  monitor.setBackgroundColor(THEME.panel)
+  monitor.setTextColor(foreground or THEME.text)
   monitor.write(text .. string.rep(" ", math.max(0, width - #text)))
   monitor.setBackgroundColor(colors.black)
   addTarget(x, y, x + width - 1, y, action)
 end
 
-local function drawCenteredButton(y, label, background, action)
+local function drawCenteredButton(y, label, foreground, action)
   local width = math.min(screenWidth, #label + 2)
   local x = math.max(1, math.floor((screenWidth - width) / 2) + 1)
-  drawButton(x, y, width, label, background, action)
+  drawButton(x, y, width, label, foreground, action)
 end
 
 local function textOf(value, fallback)
@@ -151,6 +162,18 @@ local function etaText(data, short)
   if not milliseconds then return short and "ETA calc" or "ETA: calculating..." end
   return (short and "ETA " or "ETA: ") .. (data.progressEstimated and "~" or "")
     .. durationText(milliseconds, short)
+end
+
+local function progressBar(data, width)
+  local percentage = math.max(0, math.min(100, math.floor(tonumber(data.progressPercent) or 0)))
+  local filled = math.floor(width * percentage / 100)
+  return string.rep("=", filled) .. string.rep("-", width - filled)
+end
+
+local function statusColour(data)
+  if tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 then return THEME.danger end
+  if data.stopAfterLayerRequested or data.phase == "paused" then return THEME.warning end
+  return THEME.muted
 end
 
 local function turtleIds()
@@ -191,10 +214,10 @@ local function addAlert(sender, payload)
 end
 
 local function alertColour(level)
-  if level == "success" then return colors.lime end
-  if level == "warning" then return colors.orange end
-  if level == "error" then return colors.red end
-  return colors.lightBlue
+  if level == "success" then return THEME.safe end
+  if level == "warning" then return THEME.warning end
+  if level == "error" then return THEME.danger end
+  return THEME.accent
 end
 
 local function fuelText(data, short)
@@ -214,38 +237,38 @@ end
 
 local function drawDetailCompact(entry)
   local data = entry.data
-  beginFrame("QUARRYOS | " .. turtleName(selectedTurtleId, entry))
+  beginFrame("QUARRYOS // CONTROL")
   addTarget(1, 1, screenWidth, 1, "overview")
-  writeAt(1, 3, "Area " .. textOf(data.width) .. "x" .. textOf(data.length) .. "  Layer " .. textOf(data.layer), colors.cyan)
-  writeAt(1, 4, progressText(data, false), colors.lightGray)
-  writeAt(1, 5, etaText(data, false), colors.yellow)
-  writeAt(1, 6, fuelText(data, false), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and colors.red or colors.lime)
-  writeAt(1, 7, "Blocks: " .. textOf(data.blocks) .. (data.stopAfterLayerRequested and "  Stop pending" or ""), colors.lightGray)
-  writeAt(1, 8, statusText(data), colors.yellow)
-  drawButton(1, 9, 5, "SVC", colors.red, "service_pause")
-  drawButton(7, 9, 6, "STOP", colors.orange, "stop_after_layer")
-  drawButton(14, 9, 6, "FUEL", colors.blue, "fuel_check")
-  drawButton(21, 9, 6, "LIST", colors.gray, "overview")
-  drawCenteredButton(10, "ALARMS " .. #alerts, colors.purple, "alerts")
+  writeAt(1, 3, "UNIT  " .. turtleName(selectedTurtleId, entry), THEME.text)
+  writeAt(1, 4, "[" .. progressBar(data, 12) .. "] " .. progressText(data, false), THEME.accent)
+  writeAt(1, 5, etaText(data, false) .. "  //  LAYER " .. textOf(data.layer), THEME.muted)
+  writeAt(1, 6, fuelText(data, false), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and THEME.danger or THEME.safe)
+  writeAt(1, 7, "AREA " .. textOf(data.width) .. "x" .. textOf(data.length) .. "  BLOCKS " .. textOf(data.blocks), THEME.muted)
+  writeAt(1, 8, statusText(data), statusColour(data))
+  drawButton(1, 9, 5, "SVC", THEME.danger, "service_pause")
+  drawButton(7, 9, 6, "STOP", THEME.warning, "stop_after_layer")
+  drawButton(14, 9, 6, "FUEL", THEME.accent, "fuel_check")
+  drawButton(21, 9, 6, "LIST", THEME.muted, "overview")
+  drawCenteredButton(10, "ALARMS " .. #alerts, THEME.alert, "alerts")
 end
 
 local function drawDetailTiny(entry)
   local data = entry.data
-  beginFrame("QOS " .. turtleName(selectedTurtleId, entry) .. " P" .. tinyPage)
+  beginFrame("QOS // P" .. tinyPage)
   addTarget(1, 1, screenWidth, 1, "tiny_next")
-  writeAt(1, 3, "L " .. textOf(data.layer) .. " " .. (data.stopAfterLayerRequested and "STOP" or ""), colors.cyan)
-  writeAt(1, 4, progressText(data, true), colors.lightGray)
-  writeAt(1, 5, etaText(data, true), colors.yellow)
-  writeAt(1, 6, fuelText(data, true), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and colors.red or colors.lime)
-  writeAt(1, 7, "B " .. textOf(data.blocks), colors.lightGray)
-  writeAt(1, 8, statusText(data), colors.yellow)
-  writeAt(1, 9, "Tap title: next", colors.lightGray)
+  writeAt(1, 3, clip(turtleName(selectedTurtleId, entry), screenWidth), THEME.text)
+  writeAt(1, 4, "[" .. progressBar(data, 7) .. "] " .. progressText(data, true), THEME.accent)
+  writeAt(1, 5, etaText(data, true) .. " L" .. textOf(data.layer), THEME.muted)
+  writeAt(1, 6, fuelText(data, true), tonumber(data.fuelShortfall) and tonumber(data.fuelShortfall) > 0 and THEME.danger or THEME.safe)
+  writeAt(1, 7, "BLOCKS " .. textOf(data.blocks), THEME.muted)
+  writeAt(1, 8, statusText(data), statusColour(data))
+  writeAt(1, 9, "Tap title: next", THEME.muted)
   local pages = {
-    { "SERVICE", colors.red, "service_pause" },
-    { "STOP LAYER", colors.orange, "stop_after_layer" },
-    { "FUEL CHECK", colors.blue, "fuel_check" },
-    { "TURTLES", colors.gray, "overview" },
-    { "ALARMS " .. #alerts, colors.purple, "alerts" },
+    { "SERVICE", THEME.danger, "service_pause" },
+    { "STOP LAYER", THEME.warning, "stop_after_layer" },
+    { "FUEL CHECK", THEME.accent, "fuel_check" },
+    { "TURTLES", THEME.muted, "overview" },
+    { "ALARMS " .. #alerts, THEME.alert, "alerts" },
   }
   local page = pages[tinyPage]
   drawCenteredButton(10, page[1], page[2], page[3])
@@ -253,11 +276,11 @@ end
 
 local function drawOverview()
   local ids = turtleIds()
-  beginFrame("TURTLES " .. #ids)
+  beginFrame("QUARRYOS // FLEET " .. #ids)
   if #ids == 0 then
-    writeAt(1, 3, "Waiting for Turtle", colors.yellow)
-    writeAt(1, 5, "Check Ender/Wireless", colors.lightGray)
-    writeAt(1, 6, "Modems on both ends.", colors.lightGray)
+    writeAt(1, 3, "NO ACTIVE UNITS", THEME.warning)
+    writeAt(1, 5, "Check Ender/Wireless", THEME.muted)
+    writeAt(1, 6, "Modems on both ends.", THEME.muted)
   else
     local maximum = layout == "compact" and 5 or 5
     for index = 1, math.min(#ids, maximum) do
@@ -268,30 +291,30 @@ local function drawOverview()
       local percent = tonumber(data.progressPercent)
       local status = isStale(entry) and "OFF" or ((percent and math.floor(percent) .. "%") or "...")
       local line = layout == "compact"
-        and (label .. " " .. status .. " F" .. textOf(data.fuel))
+        and ("[" .. status .. "] " .. label .. "  F" .. textOf(data.fuel))
         or (clip(label, 7) .. " " .. status)
-      local colour = isStale(entry) and colors.red or colors.white
+      local colour = isStale(entry) and THEME.danger or THEME.text
       writeAt(1, index + 2, line, colour)
       addTarget(1, index + 2, screenWidth, index + 2, "select:" .. tostring(id))
     end
-    if #ids > maximum then writeAt(1, 8, "+" .. (#ids - maximum) .. " more turtles", colors.lightGray) end
-    writeAt(1, 9, "Tap a Turtle for controls", colors.lightGray)
+    if #ids > maximum then writeAt(1, 8, "+" .. (#ids - maximum) .. " more units", THEME.muted) end
+    writeAt(1, 9, "Select a unit for controls", THEME.muted)
   end
-  drawCenteredButton(10, "ALARMS " .. #alerts, colors.purple, "alerts")
+  drawCenteredButton(10, "ALARMS " .. #alerts, THEME.alert, "alerts")
 end
 
 local function drawAlerts()
-  beginFrame("ALARMS " .. #alerts)
+  beginFrame("QUARRYOS // ALERTS " .. #alerts)
   addTarget(1, 1, screenWidth, 1, "overview")
   if #alerts == 0 then
-    writeAt(1, 4, "No alerts yet.", colors.lime)
+    writeAt(1, 4, "SYSTEM CLEAR", THEME.safe)
   else
     for index = 1, math.min(#alerts, 6) do
       local alert = alerts[index]
       writeAt(1, index + 2, alert.name .. ": " .. alert.message, alertColour(alert.level))
     end
   end
-  drawCenteredButton(10, "BACK", colors.gray, "overview")
+  drawCenteredButton(10, "BACK", THEME.muted, "overview")
 end
 
 local function render()
