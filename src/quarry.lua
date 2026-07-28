@@ -82,7 +82,7 @@ if state and not state.origin then
 end
 
 if state and not state.stats then
-  state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 }
+  state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 }
 end
 if state then
   -- Plans created by the first layer release always travelled forwards. Add
@@ -98,11 +98,14 @@ if state then
     state.layerProgress = totalCells
     state.nextCell = totalCells - 1
   end
-  state.version = math.max(3, state.version or 1)
+  state.version = math.max(4, state.version or 1)
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
   state.stopAfterLayerRequested = state.stopAfterLayerRequested or false
+  state.fluidChecks = state.fluidChecks or {}
+  state.stats.fluids = state.stats.fluids or 0
+  state.stats.seals = state.stats.seals or 0
   -- Estimate the normal Overworld bedrock level for a useful *approximate*
   -- progress display. The actual quarry still stops only when it finds
   -- bedrock, so modded worlds and other dimensions remain safe.
@@ -278,7 +281,8 @@ local function broadcastMonitor(message)
     estimatedRemainingMs = eta, completedCells = completed, plannedCells = planned,
     fuelRequired = requiredFuel, fuelShortfall = math.max(0, requiredFuel - fuelLevel()),
     stopAfterLayerRequested = state.stopAfterLayerRequested,
-    fuel = fuelLevel(), blocks = state.stats.blocks, message = message,
+    fuel = fuelLevel(), blocks = state.stats.blocks, fluids = state.stats.fluids,
+    seals = state.stats.seals, message = message,
   }
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
   if monitorNetworkReady then
@@ -530,7 +534,7 @@ local function setupMenu()
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
     layerComplete = false, bedrockFound = false, phase = "surface",
-    stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0 },
+    stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 },
     origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
     started = os.epoch("utc"), plan = choice,
     estimatedLayers = maximum == 0 and math.max(1, originY + 64) or maximum,
@@ -837,6 +841,29 @@ local function fuelForResume()
   return fuelRequiredForResume()
 end
 
+-- Keep one stack of ordinary building blocks in the Turtle. It is used only
+-- to close fluid sources in quarry walls, never for normal mining paths.
+local sealBlockWords = {
+  "cobblestone", "stone", "deepslate", "dirt", "netherrack", "tuff",
+  "andesite", "diorite", "granite", "basalt", "blackstone", "calcite",
+  "sandstone", "end_stone", "cobbled",
+}
+local protectedSealWords = {
+  "ore", "raw_", "diamond", "emerald", "lapis", "redstone", "quartz",
+  "ancient_debris", "coal", "ingot", "nugget", "gem", "tool",
+}
+
+local function isSealBlock(detail)
+  local name = detail and detail.name or ""
+  for _, word in ipairs(protectedSealWords) do
+    if name:find(word, 1, true) then return false end
+  end
+  for _, word in ipairs(sealBlockWords) do
+    if name:find(word, 1, true) then return true end
+  end
+  return false
+end
+
 local function serviceChest(requiredFuel)
   dashboard("Unloading into service chests...")
   -- The return path may leave the turtle facing back toward the quarry. The
@@ -850,10 +877,16 @@ local function serviceChest(requiredFuel)
   end
   state.stats.services = state.stats.services + 1
   saveState()
+  local reservedSealSlot = nil
   for slot = 1, 16 do
     turtle.select(slot)
     if turtle.getItemCount(slot) > 0 then
       local detail = turtle.getItemDetail(slot)
+      if not reservedSealSlot and isSealBlock(detail) then
+        -- Preserve one usable stack for the Liquid Guard instead of placing
+        -- all common stone into the normal output chest.
+        reservedSealSlot = slot
+      else
       local name = detail and detail.name or ""
       local valuable = name:find("ore") or name:find("raw_") or name:find("diamond")
         or name:find("emerald") or name:find("lapis") or name:find("redstone")
@@ -882,6 +915,7 @@ local function serviceChest(requiredFuel)
         end
       end
       if not face(0) then return false end
+      end
     end
   end
 
@@ -893,7 +927,15 @@ local function serviceChest(requiredFuel)
   end
   local attempts = 0
   while fuelLevel() < requiredFuel and attempts < 1024 do
-    turtle.select(16)
+    local fuelSlot
+    for slot = 16, 1, -1 do
+      if turtle.getItemCount(slot) == 0 then
+        fuelSlot = slot
+        break
+      end
+    end
+    if not fuelSlot then break end
+    turtle.select(fuelSlot)
     if not turtle.suckUp(1) then break end
     if turtle.refuel(0) then
       turtle.refuel(1)
@@ -1001,6 +1043,86 @@ local function isBedrock(detail)
   return name == "minecraft:bedrock"
 end
 
+local function fluidKind(detail)
+  local name = detail and detail.name or ""
+  if name == "minecraft:lava" then return "lava" end
+  if name == "minecraft:water" then return "water" end
+  return nil
+end
+
+local function fluidCheckKey(layer, x, z)
+  return tostring(layer) .. ":" .. tostring(x) .. ":" .. tostring(z)
+end
+
+local function queueFluidCheck(kind)
+  local targetLayer = state.layer + 1
+  if state.maximum > 0 and targetLayer > state.maximum then return end
+  local key = fluidCheckKey(targetLayer, state.x, state.z)
+  if not state.fluidChecks[key] then
+    state.fluidChecks[key] = { kind = kind, layer = targetLayer, x = state.x, z = state.z }
+    state.stats.fluids = state.stats.fluids + 1
+    saveState()
+    notify(kind == "lava" and "Lava found - wall check scheduled for the next layer."
+      or "Water found - wall check scheduled for the next layer.", "warning")
+  end
+end
+
+local function placeFluidSeal()
+  local selected = turtle.getSelectedSlot()
+  for slot = 1, 16 do
+    if turtle.getItemCount(slot) > 0 then
+      local detail = turtle.getItemDetail(slot)
+      if isSealBlock(detail) then
+        turtle.select(slot)
+        if turtle.place() then
+          turtle.select(selected)
+          state.stats.seals = state.stats.seals + 1
+          return true
+        end
+      end
+    end
+  end
+  turtle.select(selected)
+  return false
+end
+
+-- A fluid discovered in one layer is examined from the next layer down. The
+-- Turtle leaves the flowing fluid alone and only places a block into a fluid
+-- block found directly in one of the four surrounding walls.
+local function checkFluidWalls()
+  local key = fluidCheckKey(state.layer, state.x, state.z)
+  local marker = state.fluidChecks[key]
+  if not marker then return true end
+
+  dashboard((marker.kind == "lava" and "Checking lava walls..." or "Checking water walls..."))
+  local originalHeading = state.heading
+  local sealed = 0
+  for direction = 0, 3 do
+    if state.pauseRequested then
+      face(originalHeading)
+      return false, "pause"
+    end
+    if not face(direction) then return false, "blocked" end
+    local hasBlock, detail = turtle.inspect()
+    if hasBlock and fluidKind(detail) then
+      if not placeFluidSeal() then
+        face(originalHeading)
+        dashboard("Need Cobblestone/Stone to seal a fluid wall...")
+        notify("Fluid wall found, but the Turtle has no sealing blocks. Paused at service.", "warning")
+        return false, "fluid"
+      end
+      sealed = sealed + 1
+    end
+  end
+  if not face(originalHeading) then return false, "blocked" end
+  state.fluidChecks[key] = nil
+  saveState()
+  if sealed > 0 then
+    notify((marker.kind == "lava" and "Lava" or "Water") .. " wall sealed with " .. sealed .. " block(s).", "warning")
+  end
+  return true
+end
+
 local function mineCurrentCell()
   local hasBlock, detail = turtle.inspectDown()
   if not hasBlock then return true end
@@ -1008,9 +1130,21 @@ local function mineCurrentCell()
     state.bedrockFound = true
     return true
   end
+  local initialFluid = fluidKind(detail)
   local dug, reason = turtle.digDown()
   if dug then
     state.stats.blocks = state.stats.blocks + 1
+    local _, afterDigDetail = turtle.inspectDown()
+    local discoveredFluid = fluidKind(afterDigDetail) or initialFluid
+    if discoveredFluid then queueFluidCheck(discoveredFluid) end
+    return true
+  end
+  if initialFluid then
+    -- Some CC:Tweaked configurations do not remove source fluid with dig.
+    -- The next layer can still pass through it and inspect the surrounding
+    -- walls, so keep the quarry progressing instead of treating it as a tool
+    -- failure.
+    queueFluidCheck(initialFluid)
     return true
   end
   printError("Cannot mine below at " .. (detail.name or "unknown block") .. ".")
@@ -1048,6 +1182,9 @@ local function mineLayer()
       dashboard("Service & pause requested - returning safely...")
       return false, "pause"
     end
+    local fluidChecked, fluidReason = checkFluidWalls()
+    if not fluidChecked then return false, fluidReason or "blocked" end
+    if state.pauseRequested then return false, "pause" end
     if inventoryFull() then
       dashboard("Inventory full - returning to service chests...")
       notify("Inventory full - returning to the service station.", "warning")
@@ -1102,7 +1239,8 @@ local function completeQuarry()
   local history = fs.open("/quarryos/quarry-history", "a")
   history.writeLine(textutils.serialize({
     width = state.width, length = state.length, maximum = state.maximum,
-    blocks = state.stats.blocks, started = state.started, finished = os.epoch("utc"), layout = "layers",
+    blocks = state.stats.blocks, fluids = state.stats.fluids, seals = state.stats.seals,
+    started = state.started, finished = os.epoch("utc"), layout = "layers",
   }))
   history.close()
   fs.delete(stateFile)
@@ -1318,6 +1456,10 @@ local function runQuarry()
     if state.phase == "mining" then
       local _, result = mineLayer()
       if result == "blocked" then return end
+      if result == "fluid" then
+        if returnToBase() then pauseAtServiceStation() end
+        return
+      end
       if result == "pause" or result == "service" then
         if not returnToBase() then return end
         if state.pauseRequested then

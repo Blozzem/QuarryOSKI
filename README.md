@@ -81,6 +81,17 @@ When work resumes from the service station, it uses the same safe principle in
 reverse: it travels directly across the surface to the saved work cell and
 only then descends.
 
+## Liquid Guard
+
+When the Turtle encounters water or lava below a mined field, it records that
+position. In the following layer it passes through the flow, checks the four
+surrounding walls and only seals liquid found in a wall. Flowing liquid itself
+is left alone, so the actual entry point is closed instead. QuarryOS keeps one
+stack of common building blocks (Cobblestone, Stone, Deepslate, Dirt and
+similar blocks) in the Turtle as a sealing reserve. If none is available when
+a wall must be sealed, it returns to service and pauses safely; add a suitable
+block to the Turtle and run `q` to continue.
+
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
 previous jobs and `selftest` to check the complete setup.
