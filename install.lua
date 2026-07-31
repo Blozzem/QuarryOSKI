@@ -69,6 +69,14 @@ elseif peripheral.find("monitor") then
   writeStartup('shell.run("/quarryos/monitor_server.lua")')
   print("Monitor server installed. Reboot to start the live display.")
 else
+  print("No Turtle or Monitor detected.")
+  print("A GPS host is optional and only needed for safe quarry resumes.")
+  write("Set up this computer as a GPS host? [y/N] ")
+  local answer = read():lower()
+  if answer ~= "y" and answer ~= "yes" and answer ~= "j" and answer ~= "ja" then
+    print("No GPS host installed.")
+    return
+  end
   print("GPS host setup")
   print("Enter this computer block's coordinates (F3).")
   local x, y, z = gps.locate(2)

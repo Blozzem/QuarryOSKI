@@ -25,7 +25,7 @@ local function printHelp()
   print("  quarry | q [new]     Resume quarry or plan a new one")
   print("  stats                Show the last completed quarry statistics")
   print("  history              Show completed quarry jobs")
-  print("  selftest             Check GPS, chests, fuel and modem")
+  print("  selftest             Check optional GPS, chests, fuel and modem")
   print("  reboot | shutdown    Power controls")
   print("\nOther commands are passed to the normal ComputerCraft shell.")
 end

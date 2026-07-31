@@ -76,7 +76,12 @@ if state and state.layout ~= stateLayout then
   print("Layer mode needs a new quarry plan.")
 end
 
-if state and not state.origin then
+-- Older saves were always created with GPS. New saves record the chosen mode
+-- explicitly so a missing GPS network does not prevent a brand-new quarry.
+if state and state.gpsEnabled == nil then
+  state.gpsEnabled = state.origin ~= nil
+end
+if state and state.gpsEnabled and not state.origin then
   printError("The saved quarry has no GPS record. Run 'q new' at the starting corner.")
   return
 end
@@ -98,7 +103,7 @@ if state then
     state.layerProgress = totalCells
     state.nextCell = totalCells - 1
   end
-  state.version = math.max(5, state.version or 1)
+  state.version = math.max(6, state.version or 1)
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
@@ -113,7 +118,7 @@ if state then
   -- progress display. The actual quarry still stops only when it finds
   -- bedrock, so modded worlds and other dimensions remain safe.
   state.estimatedLayers = state.estimatedLayers or (state.maximum == 0
-    and math.max(1, state.origin.y + 64) or state.maximum)
+    and (state.origin and math.max(1, state.origin.y + 64) or 128) or state.maximum)
   state.timing = state.timing or {}
   state.timing.lastCompleted = state.timing.lastCompleted
     or ((state.layer - 1) * totalCells + math.min(totalCells, state.layerProgress or 0))
@@ -446,6 +451,25 @@ local function preflightCheck(showHeader)
   return ok
 end
 
+local function gpsLocate(timeout)
+  if not gps or type(gps.locate) ~= "function" then return nil end
+  return gps.locate(timeout)
+end
+
+local function clearFirstQuarryCell()
+  local hasBlock, detail = turtle.inspect()
+  if not hasBlock then return true end
+  local dug, digReason = turtle.dig()
+  if dug then
+    print("Mined the first block for the quarry.")
+    return true
+  end
+  paint(colors.red)
+  print("Cannot mine the first block: " .. (detail.name or "unknown block"))
+  print(digReason or "Check the turtle tool and any claim/protection.")
+  return false
+end
+
 local function setupMenu()
   if not preflightCheck(true) then
     paint(colors.white)
@@ -454,56 +478,64 @@ local function setupMenu()
   end
   term.setCursorPos(2, 9)
   paint(colors.lightGray)
-  print("Checking GPS position and facing direction...")
-  local originX, originY, originZ = gps.locate(5)
-  if not originX then
-    paint(colors.red)
-    print("GPS is required. Set up GPS host computers, then run again.")
-    return nil
-  end
-  if fuelLevel() < 2 then
-    print("Loading fuel from the top chest for GPS direction check...")
-    if not loadSetupFuel(2) then
-      paint(colors.red)
-      print("Not enough usable fuel in the top fuel chest.")
-      return nil
-    end
-  end
+  print("Checking optional GPS position...")
+  local originX, originY, originZ = gpsLocate(5)
+  local gpsEnabled = originX ~= nil
+  local forwardX, forwardZ
 
-  local moved, moveReason = turtle.forward()
-  if not moved then
-    local hasBlock, detail = turtle.inspect()
-    if hasBlock then
-      local dug, digReason = turtle.dig()
-      if dug then
-        moved, moveReason = turtle.forward()
-        if moved then print("Mined the first block for the GPS direction check.") end
-      else
+  if gpsEnabled then
+    print("GPS found. Checking start direction...")
+    if fuelLevel() < 2 then
+      print("Loading fuel from the top chest for GPS direction check...")
+      if not loadSetupFuel(2) then
         paint(colors.red)
-        print("Cannot mine the block in front: " .. (detail.name or "unknown block"))
-        print(digReason or "Check the turtle tool and any claim/protection.")
+        print("Not enough usable fuel in the top fuel chest.")
         return nil
       end
     end
+
+    local moved, moveReason = turtle.forward()
     if not moved then
+      local hasBlock, detail = turtle.inspect()
+      if hasBlock then
+        local dug, digReason = turtle.dig()
+        if dug then
+          moved, moveReason = turtle.forward()
+          if moved then print("Mined the first block for the GPS direction check.") end
+        else
+          paint(colors.red)
+          print("Cannot mine the block in front: " .. (detail.name or "unknown block"))
+          print(digReason or "Check the turtle tool and any claim/protection.")
+          return nil
+        end
+      end
+      if not moved then
+        paint(colors.red)
+        print("Cannot move forward for GPS direction check.")
+        print(moveReason or "The front may be blocked by an entity or protected area.")
+        return nil
+      end
+    end
+    local forwardXResult, ignoredY, forwardZResult = gpsLocate(5)
+    forwardX, forwardZ = forwardXResult, forwardZResult
+    local returned, returnReason = turtle.back()
+    if not returned then
       paint(colors.red)
-      print("Cannot move forward for GPS direction check.")
-      print(moveReason or "The front may be blocked by an entity or protected area.")
+      print("GPS check succeeded, but the turtle cannot return to its start.")
+      print(returnReason or "Clear the block or entity behind the turtle, then move it back manually.")
       return nil
     end
-  end
-  local forwardX, _, forwardZ = gps.locate(5)
-  local returned, returnReason = turtle.back()
-  if not returned then
-    paint(colors.red)
-    print("GPS check succeeded, but the turtle cannot return to its start.")
-    print(returnReason or "Clear the block or entity behind the turtle, then move it back manually.")
-    return nil
-  end
-  if not forwardX then
-    paint(colors.red)
-    print("GPS direction check failed. Run again near GPS coverage.")
-    return nil
+    if not forwardX then
+      paint(colors.red)
+      print("GPS direction check failed. Run again near GPS coverage.")
+      return nil
+    end
+  else
+    paint(colors.orange)
+    print("GPS not found. Starting without GPS is allowed.")
+    paint(colors.lightGray)
+    print("A stopped job can only continue from the service station with your confirmation.")
+    if not clearFirstQuarryCell() then return nil end
   end
 
   print("")
@@ -535,16 +567,19 @@ local function setupMenu()
   write("Start this quarry? [Y/n] ")
   if read():lower() == "n" then return nil end
   return {
-    layout = stateLayout, version = 3,
+    layout = stateLayout, version = 6,
     width = width, length = length, maximum = maximum,
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
     layerComplete = false, bedrockFound = false, phase = "surface", fluidChecks = {},
-    emergencyMode = true,
+    emergencyMode = true, gpsEnabled = gpsEnabled,
     stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 },
-    origin = { x = originX, y = originY, z = originZ, forwardX = forwardX - originX, forwardZ = forwardZ - originZ },
+    origin = gpsEnabled and {
+      x = originX, y = originY, z = originZ,
+      forwardX = forwardX - originX, forwardZ = forwardZ - originZ,
+    } or nil,
     started = os.epoch("utc"), plan = choice,
-    estimatedLayers = maximum == 0 and math.max(1, originY + 64) or maximum,
+    estimatedLayers = maximum == 0 and (gpsEnabled and math.max(1, originY + 64) or 128) or maximum,
     timing = { lastCompleted = 0, lastEpoch = os.epoch("utc") },
     jobId = tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")),
   }
@@ -561,7 +596,11 @@ end
 local function resolvePendingMove()
   local pending = state.pendingMove
   if not pending then return true end
-  local x, y, z = gps.locate(5)
+  if not state.gpsEnabled or not state.origin then
+    printError("This interrupted move needs GPS recovery, but this quarry has no GPS record.")
+    return false
+  end
+  local x, y, z = gpsLocate(5)
   if not x then
     printError("GPS is unavailable. QuarryOS cannot recover an interrupted move.")
     return false
@@ -591,7 +630,11 @@ local function resolvePendingMove()
 end
 
 local function verifySavedPosition()
-  local x, y, z = gps.locate(5)
+  if not state.gpsEnabled or not state.origin then
+    printError("This quarry has no GPS record for a safe position check.")
+    return false
+  end
+  local x, y, z = gpsLocate(5)
   if not x then
     printError("GPS is unavailable. QuarryOS will not resume without a position check.")
     return false
@@ -606,6 +649,10 @@ local function verifySavedPosition()
   return true
 end
 
+local function atServiceStation()
+  return state.positionStep == -1 and state.depth == 0 and state.x == 0 and state.z == 0
+end
+
 local function markStartupEmergency(reason)
   state.emergency = {
     message = reason, at = os.epoch("utc"),
@@ -617,10 +664,12 @@ local function markStartupEmergency(reason)
 end
 
 local resumePausedQuarry = state and state.phase == "paused"
+local createdNewPlan = false
 if not state then
   state = setupMenu()
   if not state then return end
   saveState()
+  createdNewPlan = true
   notify("Layer quarry started: " .. state.width .. "x" .. state.length, "info")
 elseif (state.phase == "surface" or resumePausedQuarry) and not preflightCheck(true) then
   paint(colors.white)
@@ -628,13 +677,42 @@ elseif (state.phase == "surface" or resumePausedQuarry) and not preflightCheck(t
   return
 end
 
-if not resolvePendingMove() then
-  markStartupEmergency("GPS could not recover an interrupted movement.")
-  return
-end
-if not verifySavedPosition() then
-  markStartupEmergency("GPS position check failed. Turtle stopped safely.")
-  return
+if state.gpsEnabled then
+  if not resolvePendingMove() then
+    markStartupEmergency("GPS could not recover an interrupted movement.")
+    return
+  end
+  if not verifySavedPosition() then
+    markStartupEmergency("GPS position check failed. Turtle stopped safely.")
+    return
+  end
+elseif not createdNewPlan then
+  if state.pendingMove then
+    paint(colors.red)
+    print("This no-GPS quarry stopped during a movement and cannot be safely recovered.")
+    paint(colors.lightGray)
+    print("Run 'q new' to archive it and start a new quarry.")
+    paint(colors.white)
+    return
+  elseif atServiceStation() and (state.phase == "surface" or resumePausedQuarry) then
+    paint(colors.orange)
+    print("GPS is unavailable. Confirm the turtle is at its original service station.")
+    paint(colors.lightGray)
+    write("Continue without GPS? [y/N] ")
+    local answer = read():lower()
+    if answer ~= "y" and answer ~= "yes" and answer ~= "j" and answer ~= "ja" then
+      print("Quarry remains saved.")
+      paint(colors.white)
+      return
+    end
+  else
+    paint(colors.red)
+    print("This no-GPS quarry stopped away from its service station.")
+    paint(colors.lightGray)
+    print("It cannot be safely resumed. Run 'q new' to archive it and start a new quarry.")
+    paint(colors.white)
+    return
+  end
 end
 if resumePausedQuarry then
   state.phase = "surface"
@@ -1465,10 +1543,6 @@ local function completeQuarry()
   fs.delete(stateFile)
   if fs.exists(stateBackupFile) then fs.delete(stateBackupFile) end
   return true
-end
-
-local function atServiceStation()
-  return state.positionStep == -1 and state.depth == 0 and state.x == 0 and state.z == 0
 end
 
 local function finalLayerReached()

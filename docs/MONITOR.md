@@ -1,15 +1,17 @@
 # QuarryOS live monitor
 
-QuarryOS sends live status by Ender Modem to a base computer. The base computer
-draws the selected area, current column and depth, fuel, mined blocks, current
-task, percentage and estimated remaining time on an Advanced Monitor.
+QuarryOS sends live status by Wireless or Ender Modem to a base computer. The
+base computer draws the selected area, current column and depth, fuel, mined
+blocks, current task, percentage and estimated remaining time on an Advanced
+Monitor.
 
 ## Wiring
 
 1. Place a base computer with an Advanced Monitor attached directly to it.
-2. Attach an Ender Modem to that base computer.
-3. Keep an Ender Modem attached to the Advanced Turtle; it is also used for
-   GPS and the live status messages.
+2. Attach a Wireless or Ender Modem to that base computer.
+3. Keep a Wireless or Ender Modem attached to the Advanced Turtle for live
+   status messages. GPS is optional and needs its own GPS host network only
+   when safe restart-and-position checking is wanted.
 4. On the base computer, run:
 
    ```lua

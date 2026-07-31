@@ -27,8 +27,8 @@ computers, advanced computers, turtles and pocket computers.
 - [CC:Tweaked](https://modrinth.com/mod/cc-tweaked) for the same Minecraft
   version and loader
 - An Advanced Turtle (regular turtles are intentionally not supported)
-- A CC:Tweaked GPS network; QuarryOS uses it to prevent unsafe resumes if the
-  turtle was moved after a restart
+- A CC:Tweaked GPS network is optional. It enables QuarryOS to check a saved
+  turtle position and resume safely after a restart.
 - An internet-enabled ComputerCraft computer (`http` must be enabled by the
   server or single-player configuration) for the one-line installer
 
@@ -41,9 +41,10 @@ wget run https://raw.githubusercontent.com/Blozzem/QuarryOSKI/main/install.lua
 ```
 
 The installer downloads QuarryOS to `/quarryos`, detects the device and creates
-the right `/startup` program automatically: QuarryOS on a turtle, the monitor
-server on a computer with a monitor, or a GPS host on a normal computer. GPS
-hosts ask for their coordinates when no existing GPS network can locate them.
+the right `/startup` program automatically: QuarryOS on a turtle or the monitor
+server on a computer with a monitor. On a normal computer it optionally offers
+to create a GPS host. GPS hosts ask for their coordinates when no existing GPS
+network can locate them.
 If a startup program already exists, it is copied to `/startup.quarryos-backup`.
 
 After installation, reboot the computer or execute `startup`.
@@ -76,6 +77,16 @@ keeps the quarry floor level and safe. Use `stats` to view statistics for the
 last completed quarry. The Turtle screen and live monitor show percentage and
 an estimated remaining time. Custom fixed-depth plans are exact; bedrock plans
 use the usual Overworld bedrock level as a clearly marked approximation.
+
+GPS is optional for a **new** quarry. If no GPS network is found, QuarryOS uses
+the Turtle's current facing direction as its local forward direction and starts
+normally. Do not move a no-GPS quarry. If it stops at the service station,
+QuarryOS checks the chests there and asks you to confirm that it is still at
+its original service corner before it continues. If it stops anywhere else,
+its saved location cannot be checked, so QuarryOS deliberately refuses to
+continue it. Run `q new` at the service corner to archive that unfinished job
+and begin another one. A GPS-enabled quarry keeps the automatic
+restart-and-position-check behaviour.
 
 For service trips, it rises immediately to the already-clear service level,
 then crosses directly to the access shaft instead of retracing the entire
@@ -122,10 +133,14 @@ Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
 previous jobs and `selftest` to check the complete setup.
 
-If Minecraft or the server restarts, run `q` again on the same turtle. QuarryOS
-checks its GPS position and continues at the saved layer and cell. To abandon a
-saved job and create a new plan at the service corner, run `q new`; the old
-progress is archived instead of deleted.
+If Minecraft or the server restarts, run `q` again on the same turtle.
+GPS-enabled quarries check their GPS position and continue at the saved layer
+and cell. A quarry that was started without GPS is kept safely but cannot be
+resumed if it stopped away from its service station, because its location
+cannot be verified. At the service station it asks for your manual
+confirmation before continuing. To abandon a saved job and create a new plan
+at the service corner, run `q new`; the old progress is archived instead of
+deleted.
 
 ## In-game updates
 

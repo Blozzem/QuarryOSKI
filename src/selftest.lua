@@ -38,8 +38,14 @@ if turtle then
   result("Ore chest (left)", oreChest, oreName)
   result("Block chest (right)", blockChest, blockName)
 end
-local x = gps.locate(3)
-result("GPS", x ~= nil)
+local x = gps and gps.locate and gps.locate(3)
+if x then
+  result("GPS (optional)", true)
+else
+  term.setTextColor(colors.lightGray)
+  print("INFO GPS (optional) - not configured")
+  term.setTextColor(colors.white)
+end
 local modem = false
 for _, side in ipairs(peripheral.getNames()) do
   if peripheral.getType(side) == "modem" and peripheral.call(side, "isWireless") then modem = true end
