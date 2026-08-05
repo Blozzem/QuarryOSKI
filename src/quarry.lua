@@ -103,7 +103,7 @@ if state then
     state.layerProgress = totalCells
     state.nextCell = totalCells - 1
   end
-  state.version = math.max(6, state.version or 1)
+  state.version = math.max(7, state.version or 1)
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
@@ -112,6 +112,15 @@ if state then
   -- deliberately, but a detected problem always remains saved and visible.
   state.emergencyMode = state.emergencyMode ~= false
   state.fluidChecks = state.fluidChecks or {}
+  -- Liquid Guard is lava-only. Remove old water/unknown markers created by
+  -- earlier versions before they can cause a wall to be sealed on resume.
+  local obsoleteFluidChecks = {}
+  for key, marker in pairs(state.fluidChecks) do
+    if type(marker) ~= "table" or marker.kind ~= "lava" then
+      table.insert(obsoleteFluidChecks, key)
+    end
+  end
+  for _, key in ipairs(obsoleteFluidChecks) do state.fluidChecks[key] = nil end
   state.stats.fluids = state.stats.fluids or 0
   state.stats.seals = state.stats.seals or 0
   -- Estimate the normal Overworld bedrock level for a useful *approximate*
@@ -251,6 +260,10 @@ local function loadSetupFuel(required)
 end
 
 local function paint(colour) term.setTextColor(colour) end
+
+local function isWaterBlock(detail)
+  return detail and detail.name == "minecraft:water"
+end
 
 -- Rednet only broadcasts through opened modems. The turtle modem is normally
 -- its second upgrade, next to the mining tool.
@@ -459,6 +472,10 @@ end
 local function clearFirstQuarryCell()
   local hasBlock, detail = turtle.inspect()
   if not hasBlock then return true end
+  if isWaterBlock(detail) then
+    print("Water in the first quarry cell will be left untouched.")
+    return true
+  end
   local dug, digReason = turtle.dig()
   if dug then
     print("Mined the first block for the quarry.")
@@ -498,6 +515,11 @@ local function setupMenu()
     if not moved then
       local hasBlock, detail = turtle.inspect()
       if hasBlock then
+        if isWaterBlock(detail) then
+          paint(colors.orange)
+          print("The first quarry cell contains water and will not be mined for the GPS check.")
+          return nil
+        end
         local dug, digReason = turtle.dig()
         if dug then
           moved, moveReason = turtle.forward()
@@ -567,7 +589,7 @@ local function setupMenu()
   write("Start this quarry? [Y/n] ")
   if read():lower() == "n" then return nil end
   return {
-    layout = stateLayout, version = 6,
+    layout = stateLayout, version = 7,
     width = width, length = length, maximum = maximum,
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
@@ -764,12 +786,16 @@ local function moveForward(allowDig)
   if not moved and allowDig then
     local hasBlock, detail = turtle.inspect()
     if hasBlock then
-      local dug, digReason = turtle.dig()
-      if dug then
-        state.stats.blocks = state.stats.blocks + 1
-        moved, reason = turtle.forward()
+      if isWaterBlock(detail) then
+        reason = "Water in front is left untouched"
       else
-        reason = "Cannot mine " .. (detail.name or "front block") .. ": " .. (digReason or "unknown reason")
+        local dug, digReason = turtle.dig()
+        if dug then
+          state.stats.blocks = state.stats.blocks + 1
+          moved, reason = turtle.forward()
+        else
+          reason = "Cannot mine " .. (detail.name or "front block") .. ": " .. (digReason or "unknown reason")
+        end
       end
     end
   end
@@ -795,12 +821,16 @@ local function moveDown(allowDig)
   if not moved and allowDig then
     local hasBlock, detail = turtle.inspectDown()
     if hasBlock then
-      local dug, digReason = turtle.digDown()
-      if dug then
-        state.stats.blocks = state.stats.blocks + 1
-        moved, reason = turtle.down()
+      if isWaterBlock(detail) then
+        reason = "Water below is left untouched"
       else
-        reason = "Cannot mine " .. (detail.name or "block below") .. ": " .. (digReason or "unknown reason")
+        local dug, digReason = turtle.digDown()
+        if dug then
+          state.stats.blocks = state.stats.blocks + 1
+          moved, reason = turtle.down()
+        else
+          reason = "Cannot mine " .. (detail.name or "block below") .. ": " .. (digReason or "unknown reason")
+        end
       end
     end
   end
@@ -828,12 +858,16 @@ local function moveUp(allowDig)
   if not moved and allowDig then
     local hasBlock, detail = turtle.inspectUp()
     if hasBlock then
-      local dug, digReason = turtle.digUp()
-      if dug then
-        state.stats.blocks = state.stats.blocks + 1
-        moved, reason = turtle.up()
+      if isWaterBlock(detail) then
+        reason = "Water above is left untouched"
       else
-        reason = "Cannot mine " .. (detail.name or "block above") .. ": " .. (digReason or "unknown reason")
+        local dug, digReason = turtle.digUp()
+        if dug then
+          state.stats.blocks = state.stats.blocks + 1
+          moved, reason = turtle.up()
+        else
+          reason = "Cannot mine " .. (detail.name or "block above") .. ": " .. (digReason or "unknown reason")
+        end
       end
     end
   end
@@ -1260,22 +1294,29 @@ local function fluidCheckKey(layer, x, z)
 end
 
 local function queueFluidCheck(kind)
+  -- Water is intentionally never recorded or treated by Liquid Guard.
+  if kind ~= "lava" then return end
   state.fluidChecks = state.fluidChecks or {}
   local targetLayer = state.layer + 1
   if state.maximum > 0 and targetLayer > state.maximum then return end
   local key = fluidCheckKey(targetLayer, state.x, state.z)
   if not state.fluidChecks[key] then
     state.fluidChecks[key] = { kind = kind, layer = targetLayer, x = state.x, z = state.z }
-    if kind ~= "unknown" then state.stats.fluids = state.stats.fluids + 1 end
+    state.stats.fluids = state.stats.fluids + 1
     saveState()
-    if kind == "lava" or kind == "water" then
-      notify(kind == "lava" and "Lava found - wall check scheduled for the next layer."
-        or "Water found - wall check scheduled for the next layer.", "warning")
-    end
+    notify("Lava found - wall check scheduled for the next layer.", "warning")
   end
 end
 
-local function placeFluidSeal()
+local function placeLavaSeal()
+  -- Re-check immediately before placing. A water flow must never be replaced
+  -- by a sealing block, even if the neighbouring world changed since the
+  -- outer wall scan.
+  local hasBlock, detail = turtle.inspect()
+  if not hasBlock then return true, false end
+  local kind, isSource = isFluidSource(detail)
+  if kind ~= "lava" or not isSource then return true, false end
+
   local selected = turtle.getSelectedSlot()
   for slot = 1, 16 do
     if turtle.getItemCount(slot) > 0 then
@@ -1285,20 +1326,20 @@ local function placeFluidSeal()
         if turtle.place() then
           turtle.select(selected)
           state.stats.seals = state.stats.seals + 1
-          return true
+          return true, true
         end
       end
     end
   end
   turtle.select(selected)
-  return false
+  return false, false
 end
 
 -- Only a real Lava source (level 0) receives the temporary block test. A
 -- flowing Lava field is recorded for the next layer but is never built into.
 local function probeOpenFloor(detail)
   local visibleFluid, isSource = isFluidSource(detail)
-  if visibleFluid ~= "lava" or not isSource then return true, visibleFluid end
+  if visibleFluid ~= "lava" or not isSource then return true, nil end
 
   local selected = turtle.getSelectedSlot()
   for slot = 1, 16 do
@@ -1316,25 +1357,29 @@ local function probeOpenFloor(detail)
   return false
 end
 
--- Keep all fluid handling on one route. This prevents a visible Lava source
--- from bypassing the test while ensuring a flowing Lava field is never filled.
+-- Keep all fluid handling on one route. Water is deliberately ignored: the
+-- Turtle does not mark, seal or dig it. Lava is the only guarded liquid.
 local function handleFluidBelow(detail)
   local kind, isSource = isFluidSource(detail)
   if kind == "lava" and isSource then return probeOpenFloor(detail) end
-  return true, kind
+  if kind == "lava" then return true, "lava" end
+  return true, nil
 end
 
--- A fluid discovered in one layer is examined from the next layer down. The
--- Turtle leaves the flowing fluid alone and only places a block into a fluid
--- block found directly in one of the four surrounding walls.
+-- A Lava field discovered in one layer is examined from the next layer down.
+-- Water is ignored completely and is never replaced with a block.
 local function checkFluidWalls()
   state.fluidChecks = state.fluidChecks or {}
   local key = fluidCheckKey(state.layer, state.x, state.z)
   local marker = state.fluidChecks[key]
   if not marker then return true end
+  if type(marker) ~= "table" or marker.kind ~= "lava" then
+    state.fluidChecks[key] = nil
+    saveState()
+    return true
+  end
 
-  local label = marker.kind == "lava" and "lava" or (marker.kind == "water" and "water" or "fluid")
-  dashboard("Checking " .. label .. " walls...")
+  dashboard("Checking lava walls...")
   local originalHeading = state.heading
   local sealed = 0
   for direction = 0, 3 do
@@ -1346,23 +1391,22 @@ local function checkFluidWalls()
     local hasBlock, detail = turtle.inspect()
     local wallFluid, wallIsSource
     if hasBlock then wallFluid, wallIsSource = isFluidSource(detail) end
-    if wallFluid and wallIsSource then
-      if not placeFluidSeal() then
+    if wallFluid == "lava" and wallIsSource then
+      local placed, didSeal = placeLavaSeal()
+      if not placed then
         face(originalHeading)
-        dashboard("Need Cobblestone/Stone to seal a fluid wall...")
-        notify("Fluid wall found, but the Turtle has no sealing blocks. Paused at service.", "warning")
+        dashboard("Need Cobblestone/Stone to seal a Lava wall...")
+        notify("Lava wall found, but the Turtle has no sealing blocks. Paused at service.", "warning")
         return false, "fluid"
       end
-      sealed = sealed + 1
+      if didSeal then sealed = sealed + 1 end
     end
   end
   if not face(originalHeading) then return false, "blocked" end
   state.fluidChecks[key] = nil
   saveState()
   if sealed > 0 then
-    if marker.kind == "unknown" then state.stats.fluids = state.stats.fluids + 1 end
-    notify((marker.kind == "lava" and "Lava" or (marker.kind == "water" and "Water" or "Fluid"))
-      .. " wall sealed with " .. sealed .. " block(s).", "warning")
+    notify("Lava wall sealed with " .. sealed .. " block(s).", "warning")
   end
   return true
 end

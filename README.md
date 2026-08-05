@@ -115,19 +115,20 @@ travel back automatically.
 ## Liquid Guard
 
 When Lava is detected below, the Turtle briefly places and removes a normal
-block in that Lava field, then records the position. It does not place a test
-block into air or water. In the following layer it passes through the flow, checks the
-four surrounding walls and only seals a source block (`level = 0`) found in a
-wall. Flowing liquid itself is left alone, so the actual entry point is closed instead. QuarryOS
-keeps one stack of common building blocks (Cobblestone, Stone, Deepslate, Dirt
-and similar blocks) in **slot 16** (the bottom-right turtle slot) as a sealing
-reserve. This is a fixed reserve slot: QuarryOS never unloads an item that you
-put there. Fill it with a suitable block before starting. If that slot is empty,
-QuarryOS also tries to take a stack from the
-right normal-block chest. If none is available it pauses safely at the service
-station and tells you exactly which slot to fill. Add a suitable block to slot
-16 (or the right chest) and run `q` to continue. When the quarry is fully
-complete, its final service visit empties slot 16 into the right chest too.
+block in that Lava field, then records the position. In the following layer it
+passes through the flow, checks the four surrounding walls and only seals a
+Lava source block (`level = 0`) found in a wall. Flowing Lava itself is left
+alone, so the actual entry point is closed instead. **Water is ignored
+completely:** it is not recorded, tested, sealed or removed. QuarryOS keeps one
+stack of common building blocks (Cobblestone, Stone, Deepslate, Dirt and similar
+blocks) in **slot 16** (the bottom-right turtle slot) as a Lava-sealing reserve.
+This is a fixed reserve slot: QuarryOS never unloads an item that you put there.
+Fill it with a suitable block before starting. If that slot is empty, QuarryOS
+also tries to take a stack from the right normal-block chest. If none is
+available it pauses safely at the service station and tells you exactly which
+slot to fill. Add a suitable block to slot 16 (or the right chest) and run `q`
+to continue. When the quarry is fully complete, its final service visit empties
+slot 16 into the right chest too.
 
 Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
