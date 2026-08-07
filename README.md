@@ -152,6 +152,7 @@ No computer files need to be deleted; only QuarryOS files are replaced.
 
 - [GPS network setup](docs/GPS.md)
 - [Live monitor setup](docs/MONITOR.md)
+- [Web-Dashboard und Minecraft-Verbindung](docs/WEB.md)
 
 ## Development layout
 

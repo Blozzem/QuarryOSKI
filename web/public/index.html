@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuarryOS Control</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header><div><span class="eyebrow">CC:TWEAKED OPERATIONS</span><h1>QuarryOS Control</h1></div><span id="connection" class="pill">Nicht verbunden</span></header>
+  <main>
+    <section id="login" class="login card">
+      <h2>Dashboard verbinden</h2>
+      <p>Gib denselben Schlüssel ein, den du im Webserver und im Minecraft-Gateway verwendest.</p>
+      <form id="login-form"><input id="key" type="password" autocomplete="current-password" placeholder="API-Schlüssel" required><button>Verbinden</button></form>
+    </section>
+    <section id="dashboard" hidden>
+      <div class="toolbar"><div><span class="eyebrow">LIVE FLEET</span><h2 id="fleet-title">Turtles</h2></div><button id="logout" class="secondary">Trennen</button></div>
+      <div id="notice" class="notice" hidden></div>
+      <div id="turtles" class="grid"></div>
+    </section>
+  </main>
+  <template id="turtle-template">
+    <article class="card turtle">
+      <div class="card-head"><div><span class="status-dot"></span><strong class="name"></strong></div><span class="phase pill"></span></div>
+      <div class="progress"><i></i></div><div class="metric-row"><span class="percent"></span><span class="eta"></span></div>
+      <dl><div><dt>Ebene</dt><dd class="layer"></dd></div><div><dt>Treibstoff</dt><dd class="fuel"></dd></div><div><dt>Blöcke</dt><dd class="blocks"></dd></div><div><dt>Zuletzt</dt><dd class="seen"></dd></div></dl>
+      <p class="message"></p>
+      <div class="actions"><button data-command="service_pause">Service & Pause</button><button data-command="stop_after_layer" class="secondary">Nach Ebene stoppen</button><button data-command="fuel_check" class="secondary">Fuel prüfen</button><button data-command="emergency_toggle" class="danger">Notfallmodus</button></div>
+    </article>
+  </template>
+  <script src="/app.js" defer></script>
+</body>
+</html>

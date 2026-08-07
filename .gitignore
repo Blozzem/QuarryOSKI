@@ -4,3 +4,6 @@ startup.quarryos-backup
 # IDE files
 .idea/
 .vscode/
+
+# Local deployment packages
+dist/

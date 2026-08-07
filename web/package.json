@@ -1,0 +1,13 @@
+{
+  "name": "quarryos-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local QuarryOS web dashboard and CC:Tweaked bridge API",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/server.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
