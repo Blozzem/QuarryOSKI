@@ -284,10 +284,29 @@ end
 
 monitorNetworkReady = openMonitorModems()
 
+local function inventorySnapshot()
+  local slots, usedSlots, totalItems = {}, 0, 0
+  for slot = 1, 16 do
+    local count = turtle.getItemCount(slot)
+    local detail = count > 0 and turtle.getItemDetail(slot) or nil
+    slots[slot] = {
+      slot = slot,
+      count = count,
+      name = detail and detail.name or nil,
+    }
+    if count > 0 then
+      usedSlots = usedSlots + 1
+      totalItems = totalItems + count
+    end
+  end
+  return slots, usedSlots, totalItems
+end
+
 local function broadcastMonitor(message)
   local total = state.width * state.length
   local percentage, eta, approximate, completed, planned = quarryProgress()
   local requiredFuel = fuelRequiredForResume()
+  local inventory, inventoryUsedSlots, inventoryTotalItems = inventorySnapshot()
   local payload = {
     jobId = state.jobId, turtleName = os.getComputerLabel() or ("Turtle " .. os.getComputerID()), phase = state.phase,
     width = state.width, length = state.length, maximum = state.maximum,
@@ -307,6 +326,8 @@ local function broadcastMonitor(message)
     emergencyAt = state.emergency and state.emergency.at or nil,
     fuel = fuelLevel(), blocks = state.stats.blocks, fluids = state.stats.fluids,
     seals = state.stats.seals, message = message,
+    inventory = inventory, inventoryUsedSlots = inventoryUsedSlots,
+    inventoryTotalItems = inventoryTotalItems,
   }
   if not monitorNetworkReady then monitorNetworkReady = openMonitorModems() end
   if monitorNetworkReady then

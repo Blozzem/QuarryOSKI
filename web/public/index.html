@@ -26,6 +26,15 @@
       <div class="progress"><i></i></div><div class="metric-row"><span class="percent"></span><span class="eta"></span></div>
       <dl><div><dt>Ebene</dt><dd class="layer"></dd></div><div><dt>Treibstoff</dt><dd class="fuel"></dd></div><div><dt>Blöcke</dt><dd class="blocks"></dd></div><div><dt>Zuletzt</dt><dd class="seen"></dd></div></dl>
       <p class="message"></p>
+      <section class="telemetry map-panel">
+        <div class="section-head"><strong>Live-Karte</strong><span class="map-meta"></span></div>
+        <canvas class="quarry-map" aria-label="Live-Karte der Quarry"></canvas>
+        <div class="legend"><span><i class="done"></i>Abgebaut</span><span><i class="current"></i>Turtle</span><span><i class="open"></i>Offen</span></div>
+      </section>
+      <section class="telemetry inventory-panel">
+        <div class="section-head"><strong>Inventar</strong><span class="inventory-meta"></span></div>
+        <div class="inventory" aria-label="Turtle-Inventar"></div>
+      </section>
       <div class="actions"><button data-command="service_pause">Service & Pause</button><button data-command="stop_after_layer" class="secondary">Nach Ebene stoppen</button><button data-command="fuel_check" class="secondary">Fuel prüfen</button><button data-command="emergency_toggle" class="danger">Notfallmodus</button></div>
     </article>
   </template>
