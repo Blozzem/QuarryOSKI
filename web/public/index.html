@@ -3,39 +3,105 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b0d">
   <title>QuarryOS Control</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-  <header><div><span class="eyebrow">CC:TWEAKED OPERATIONS</span><h1>QuarryOS Control</h1></div><span id="connection" class="pill">Nicht verbunden</span></header>
-  <main>
+<body data-density="comfortable" data-motion="full">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">Q</span><div><span class="eyebrow">CC:TWEAKED OPERATIONS</span><h1>QuarryOS</h1></div></div>
+    <div class="top-actions"><span id="connection" class="connection"><i></i>Nicht verbunden</span><button id="logout" class="ghost small" hidden>Abmelden</button></div>
+  </header>
+
+  <main class="page">
     <section id="login" class="login card">
-      <h2>Dashboard verbinden</h2>
-      <p>Gib denselben Schlüssel ein, den du im Webserver und im Minecraft-Gateway verwendest.</p>
-      <form id="login-form"><input id="key" type="password" autocomplete="current-password" placeholder="API-Schlüssel" required><button>Verbinden</button></form>
+      <span class="eyebrow">SICHERE VERBINDUNG</span>
+      <h2>Dashboard öffnen</h2>
+      <p>Verwende den API-Schlüssel aus deiner Hostinger-Konfiguration.</p>
+      <form id="login-form"><label for="key">API-Schlüssel</label><div class="input-row"><input id="key" type="password" autocomplete="current-password" placeholder="Schlüssel eingeben" required><button>Verbinden</button></div></form>
     </section>
-    <section id="dashboard" hidden>
-      <div class="toolbar"><div><span class="eyebrow">LIVE FLEET</span><h2 id="fleet-title">Turtles</h2></div><button id="logout" class="secondary">Trennen</button></div>
-      <div id="notice" class="notice" hidden></div>
-      <div id="turtles" class="grid"></div>
+
+    <section id="dashboard" class="app-shell" hidden>
+      <aside class="sidebar card">
+        <nav class="main-nav" aria-label="Hauptnavigation">
+          <button data-view="overview" class="active"><span class="nav-icon">⌂</span><span>Übersicht</span></button>
+          <button data-view="fleet"><span class="nav-icon">◇</span><span>Turtles</span><b id="nav-count">0</b></button>
+          <button data-view="settings"><span class="nav-icon">⚙</span><span>Einstellungen</span></button>
+        </nav>
+        <div class="sidebar-foot"><span>Gateway</span><strong id="gateway-state">Warte auf Daten</strong><small id="last-sync">Noch nicht synchronisiert</small></div>
+      </aside>
+
+      <section class="workspace">
+        <div id="notice" class="notice" hidden></div>
+
+        <section class="view active" data-page="overview">
+          <div class="view-head"><div><span class="eyebrow">FLEET OVERVIEW</span><h2>Kontrollzentrum</h2><p>Alle wichtigen Werte auf einen Blick.</p></div><button class="secondary" data-open-fleet>Alle Turtles</button></div>
+          <div class="stats-grid">
+            <article class="stat card"><span>Online</span><strong id="stat-online">0</strong><small id="stat-total">von 0 Einheiten</small></article>
+            <article class="stat card"><span>Aktiv</span><strong id="stat-active">0</strong><small>laufende Quarrys</small></article>
+            <article class="stat card"><span>Blöcke</span><strong id="stat-blocks">0</strong><small>aktuell erfasst</small></article>
+            <article class="stat card warning-stat"><span>Warnungen</span><strong id="stat-warnings">0</strong><small>benötigen Aufmerksamkeit</small></article>
+          </div>
+          <article class="card overview-panel">
+            <div class="panel-head"><div><span class="eyebrow">LIVE UNITS</span><h3>Aktive Einheiten</h3></div><span id="overview-status" class="muted">Keine Daten</span></div>
+            <div id="overview-turtles" class="overview-list"></div>
+          </article>
+        </section>
+
+        <section class="view" data-page="fleet" hidden>
+          <div class="view-head"><div><span class="eyebrow">FLEET MANAGEMENT</span><h2>Turtles</h2><p>Einheit auswählen und Details öffnen.</p></div><span id="fleet-title" class="pill">0 Einheiten</span></div>
+          <div class="fleet-layout">
+            <aside class="unit-list card"><div class="unit-list-head">Einheiten</div><div id="units"></div></aside>
+            <div id="detail" class="detail-area"><div class="empty card"><strong>Keine Turtle ausgewählt</strong><span>Wähle links eine Einheit aus.</span></div></div>
+          </div>
+        </section>
+
+        <section class="view" data-page="settings" hidden>
+          <div class="view-head"><div><span class="eyebrow">PREFERENCES</span><h2>Einstellungen</h2><p>Darstellung und Aktualisierung dieses Browsers.</p></div></div>
+          <div class="settings-grid">
+            <article class="card setting-card"><div><strong>Aktualisierungsrate</strong><p>Wie oft neue Turtle-Daten geladen werden.</p></div><select id="refresh-rate"><option value="2000">2 Sekunden</option><option value="3000">3 Sekunden</option><option value="5000">5 Sekunden</option><option value="10000">10 Sekunden</option></select></article>
+            <article class="card setting-card"><div><strong>Ansichtsdichte</strong><p>Mehr Platz oder mehr Informationen.</p></div><select id="density"><option value="comfortable">Komfortabel</option><option value="compact">Kompakt</option></select></article>
+            <article class="card setting-card"><div><strong>Akzentfarbe</strong><p>Farbe für Status, Karte und Auswahl.</p></div><select id="accent"><option value="mint">Mint</option><option value="cyan">Cyan</option><option value="amber">Amber</option></select></article>
+            <article class="card setting-card"><div><strong>Bewegungen</strong><p>Weiche Übergänge und Animationen verwenden.</p></div><label class="switch"><input id="motion" type="checkbox"><span></span></label></article>
+          </div>
+          <article class="card security-card"><div><span class="eyebrow">SICHERHEIT</span><h3>Verbindung</h3><p>Der API-Schlüssel bleibt nur in dieser Browser-Sitzung. Kritische Turtle-Befehle verlangen immer eine Bestätigung.</p></div><button id="settings-logout" class="danger ghost">Schlüssel entfernen</button></article>
+        </section>
+      </section>
     </section>
   </main>
-  <template id="turtle-template">
-    <article class="card turtle">
-      <div class="card-head"><div><span class="status-dot"></span><strong class="name"></strong></div><span class="phase pill"></span></div>
-      <div class="progress"><i></i></div><div class="metric-row"><span class="percent"></span><span class="eta"></span></div>
-      <dl><div><dt>Ebene</dt><dd class="layer"></dd></div><div><dt>Treibstoff</dt><dd class="fuel"></dd></div><div><dt>Blöcke</dt><dd class="blocks"></dd></div><div><dt>Zuletzt</dt><dd class="seen"></dd></div></dl>
-      <p class="message"></p>
-      <section class="telemetry map-panel">
-        <div class="section-head"><strong>Live-Karte</strong><span class="map-meta"></span></div>
+
+  <template id="overview-unit-template">
+    <button class="overview-unit"><span class="status-dot"></span><span class="unit-copy"><strong class="name"></strong><small class="message"></small></span><span class="unit-progress"><b class="percent"></b><i><em></em></i></span><span class="chevron">›</span></button>
+  </template>
+
+  <template id="unit-row-template">
+    <button class="unit-row"><span class="status-dot"></span><span><strong class="name"></strong><small class="phase"></small></span><b class="percent"></b></button>
+  </template>
+
+  <template id="detail-template">
+    <article class="detail card">
+      <header class="detail-head"><div><span class="eyebrow unit-id"></span><div class="title-line"><span class="status-dot"></span><h3 class="name"></h3></div><p class="message"></p></div><span class="phase pill"></span></header>
+      <div class="hero-progress"><div><span class="percent"></span><span class="eta"></span></div><i><em></em></i></div>
+      <nav class="subnav" aria-label="Turtle-Details">
+        <button data-tab="status" class="active">Status</button><button data-tab="map">Live-Karte</button><button data-tab="inventory">Inventar</button><button data-tab="control">Steuerung</button>
+      </nav>
+      <section class="tab-panel active" data-panel="status">
+        <div class="metric-grid"><div><span>Ebene</span><strong class="layer"></strong></div><div><span>Treibstoff</span><strong class="fuel"></strong></div><div><span>Blöcke</span><strong class="blocks"></strong></div><div><span>Letztes Signal</span><strong class="seen"></strong></div><div><span>Quarry</span><strong class="dimensions"></strong></div><div><span>Slots belegt</span><strong class="slots-used"></strong></div></div>
+        <div class="status-message"><span>Aktuelle Meldung</span><strong class="message-detail"></strong></div>
+      </section>
+      <section class="tab-panel" data-panel="map" hidden>
+        <div class="panel-head compact"><div><strong>Ebene im Überblick</strong><small class="map-meta"></small></div><span class="map-position"></span></div>
         <canvas class="quarry-map" aria-label="Live-Karte der Quarry"></canvas>
         <div class="legend"><span><i class="done"></i>Abgebaut</span><span><i class="current"></i>Turtle</span><span><i class="open"></i>Offen</span></div>
       </section>
-      <section class="telemetry inventory-panel">
-        <div class="section-head"><strong>Inventar</strong><span class="inventory-meta"></span></div>
+      <section class="tab-panel" data-panel="inventory" hidden>
+        <div class="panel-head compact"><div><strong>16 Turtle-Slots</strong><small>Slot 16 ist die Liquid-Guard-Reserve.</small></div><span class="inventory-meta"></span></div>
         <div class="inventory" aria-label="Turtle-Inventar"></div>
       </section>
-      <div class="actions"><button data-command="service_pause">Service & Pause</button><button data-command="stop_after_layer" class="secondary">Nach Ebene stoppen</button><button data-command="fuel_check" class="secondary">Fuel prüfen</button><button data-command="emergency_toggle" class="danger">Notfallmodus</button></div>
+      <section class="tab-panel" data-panel="control" hidden>
+        <div class="control-note"><strong>Sichere Fernsteuerung</strong><span>Befehle werden von der Turtle bestätigt und nur an sicheren Arbeitspunkten übernommen.</span></div>
+        <div class="actions"><button data-command="service_pause">Service & Pause</button><button data-command="stop_after_layer" class="secondary">Nach Ebene stoppen</button><button data-command="fuel_check" class="secondary">Fuel prüfen</button><button data-command="emergency_toggle" class="danger ghost">Notfallmodus</button></div>
+      </section>
     </article>
   </template>
   <script src="/app.js" defer></script>

@@ -1,7 +1,30 @@
 -- QuarryOS CC:Tweaked-to-web gateway. Run this on a separate computer with a
 -- wireless/Ender modem. It forwards Rednet status and safe control commands.
 local CONFIG_PATH = "/quarryos/web-gateway.cfg"
+local AUTOSTART_DIR = "/startup"
+local AUTOSTART_PATH = AUTOSTART_DIR .. "/quarryos-web-gateway.lua"
 local args = { ... }
+
+local function installAutostart()
+  if fs.exists(AUTOSTART_DIR) and not fs.isDir(AUTOSTART_DIR) then
+    return false, "/startup is an existing file. Add shell.run(\"/quarryos/web_gateway.lua\") to it manually."
+  end
+  if not fs.exists(AUTOSTART_DIR) then fs.makeDir(AUTOSTART_DIR) end
+  local file = fs.open(AUTOSTART_PATH, "w")
+  if not file then return false, "Could not write " .. AUTOSTART_PATH end
+  file.write('if shell.openTab then\n')
+  file.write('  shell.openTab("/quarryos/web_gateway.lua")\n')
+  file.write('else\n')
+  file.write('  shell.run("/quarryos/web_gateway.lua")\n')
+  file.write('end\n')
+  file.close()
+  return true
+end
+
+local function removeAutostart()
+  if fs.exists(AUTOSTART_PATH) then fs.delete(AUTOSTART_PATH) end
+  print("QuarryOS Web Gateway autostart removed.")
+end
 
 local function readConfig()
   if not fs.exists(CONFIG_PATH) then return nil end
@@ -24,9 +47,23 @@ local function setup()
   file.write(textutils.serialize({ baseUrl = baseUrl, apiKey = apiKey }))
   file.close()
   print("Saved. The key is stored on this Minecraft computer.")
+  local installed, reason = installAutostart()
+  if installed then
+    print("Autostart installed. The gateway will reconnect after a reboot.")
+  else
+    printError("Autostart was not installed: " .. tostring(reason))
+  end
   return true
 end
 
+if args[1] == "autostart" then
+  local installed, reason = installAutostart()
+  if installed then print("QuarryOS Web Gateway autostart installed.") else printError(reason) end
+  return
+elseif args[1] == "remove-autostart" then
+  removeAutostart()
+  return
+end
 if args[1] == "setup" and not setup() then return end
 local config = readConfig()
 if not config then printError("Run: /quarryos/web_gateway.lua setup") return end

@@ -37,12 +37,19 @@ dem Wert aus PowerShell entsprechen. Anschließend startest du:
 /quarryos/web_gateway.lua
 ```
 
-Optional kannst du das Gateway automatisch booten lassen, indem `/startup.lua`
-folgende Zeile enthält:
+Das Setup installiert automatisch
+`/startup/quarryos-web-gateway.lua`. Dadurch startet das Gateway nach jedem
+Neustart des Computers erneut. Bei einem bereits eingerichteten Gateway kannst
+du den Autostart nachträglich aktivieren:
 
 ```lua
-shell.run("/quarryos/web_gateway.lua")
+/quarryos/web_gateway.lua autostart
 ```
+
+Zum Entfernen dient `/quarryos/web_gateway.lua remove-autostart`. Existiert
+bereits eine Datei namens `/startup` (statt eines Startup-Ordners), verändert
+QuarryOS sie nicht. Ergänze dort in diesem Sonderfall manuell
+`shell.run("/quarryos/web_gateway.lua")`.
 
 ## 3. Lokale IPs in CC:Tweaked erlauben
 
