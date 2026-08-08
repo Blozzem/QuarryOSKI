@@ -9,6 +9,8 @@
 
 Nach einem Update der Dateien in Hostinger immer eine neue Bereitstellung
 starten. Nur das Hochladen ersetzt eine bereits laufende Version nicht.
+Danach das Dashboard einmal mit `Strg+F5` neu laden, damit der Browser keine
+Dateien aus einer vorherigen Bereitstellung verwendet.
 
 Wenn `Web App bereitstellen` nicht angeboten wird, unterstuetzt der gebuchte
 Hostinger-Tarif keine serverseitige Node.js-Anwendung. Fuer diese Variante ist

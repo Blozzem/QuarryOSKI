@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#080b0d">
   <title>QuarryOS Control</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?v=20260808-2">
 </head>
 <body data-density="comfortable" data-motion="full">
   <header class="topbar">
@@ -83,7 +83,7 @@
       <header class="detail-head"><div><span class="eyebrow unit-id"></span><div class="title-line"><span class="status-dot"></span><h3 class="name"></h3></div><p class="message"></p></div><span class="phase pill"></span></header>
       <div class="hero-progress"><div><span class="percent"></span><span class="eta"></span></div><i><em></em></i></div>
       <nav class="subnav" aria-label="Turtle-Details">
-        <button data-tab="status" class="active">Status</button><button data-tab="map">Live-Karte</button><button data-tab="inventory">Inventar</button><button data-tab="control">Steuerung</button>
+        <button data-tab="status" class="active">Status</button><button data-tab="map">Live-Karte</button><button data-tab="inventory">Inventar</button><button data-tab="statistics">Statistiken</button><button data-tab="control">Steuerung</button>
       </nav>
       <section class="tab-panel active" data-panel="status">
         <div class="metric-grid"><div><span>Ebene</span><strong class="layer"></strong></div><div><span>Treibstoff</span><strong class="fuel"></strong></div><div><span>Blöcke</span><strong class="blocks"></strong></div><div><span>Letztes Signal</span><strong class="seen"></strong></div><div><span>Quarry</span><strong class="dimensions"></strong></div><div><span>Slots belegt</span><strong class="slots-used"></strong></div></div>
@@ -98,12 +98,22 @@
         <div class="panel-head compact"><div><strong>16 Turtle-Slots</strong><small>Slot 16 ist die Liquid-Guard-Reserve.</small></div><span class="inventory-meta"></span></div>
         <div class="inventory" aria-label="Turtle-Inventar"></div>
       </section>
+      <section class="tab-panel" data-panel="statistics" hidden>
+        <div class="panel-head compact"><div><strong>Abbau-Statistiken</strong><small>Live-Werte der aktuellen oder zuletzt beendeten Quarry.</small></div><span class="statistics-meta"></span></div>
+        <div class="metric-grid statistics-summary">
+          <div><span>Blöcke abgebaut</span><strong class="stats-blocks"></strong></div><div><span>Erzblöcke</span><strong class="stats-ores"></strong></div><div><span>Blockarten</span><strong class="stats-types"></strong></div><div><span>Laufbewegungen</span><strong class="stats-surface"></strong></div><div><span>Vertikalbewegungen</span><strong class="stats-vertical"></strong></div><div><span>Service-Besuche</span><strong class="stats-services"></strong></div><div><span>Lavafelder</span><strong class="stats-fluids"></strong></div><div><span>Lava versiegelt</span><strong class="stats-seals"></strong></div>
+        </div>
+        <div class="statistics-breakdowns">
+          <article class="ranking"><div><strong>Gefundene Erze</strong><small>Nach abgebauten Erzblöcken</small></div><div class="ore-ranking"></div></article>
+          <article class="ranking"><div><strong>Häufigste Blockarten</strong><small>Top 10 dieser Quarry</small></div><div class="block-ranking"></div></article>
+        </div>
+      </section>
       <section class="tab-panel" data-panel="control" hidden>
         <div class="control-note"><strong>Sichere Fernsteuerung</strong><span>Befehle werden von der Turtle bestätigt und nur an sicheren Arbeitspunkten übernommen.</span></div>
         <div class="actions"><button data-command="service_pause">Service & Pause</button><button data-command="stop_after_layer" class="secondary">Nach Ebene stoppen</button><button data-command="fuel_check" class="secondary">Fuel prüfen</button><button data-command="emergency_toggle" class="danger ghost">Notfallmodus</button></div>
       </section>
     </article>
   </template>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=20260808-2" defer></script>
 </body>
 </html>

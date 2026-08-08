@@ -1,6 +1,6 @@
 {
   "name": "quarryos-web",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Local QuarryOS web dashboard and CC:Tweaked bridge API",
   "scripts": {

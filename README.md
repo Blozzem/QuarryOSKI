@@ -20,8 +20,8 @@ computers, advanced computers, turtles and pocket computers.
   its service chest and safely returns to its starting corner
 - Live monitor control centre with alerts, fuel checks and support for several
   independently running Turtles
-- Web dashboard with a live quarry map, 16-slot Turtle inventory and safe
-  remote control through a dedicated CC:Tweaked gateway
+- Web dashboard with a live quarry map, 16-slot Turtle inventory, mined-block
+  statistics and safe remote control through a dedicated CC:Tweaked gateway
 
 ## Requirements
 

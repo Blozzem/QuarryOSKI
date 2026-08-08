@@ -359,6 +359,16 @@ local function broadcastMonitor(message)
     emergencyAt = state.emergency and state.emergency.at or nil,
     fuel = fuelLevel(), blocks = state.stats.blocks, fluids = state.stats.fluids,
     seals = state.stats.seals, message = message,
+    statistics = {
+      blocks = state.stats.blocks,
+      surfaceMoves = state.stats.surfaceMoves,
+      verticalMoves = state.stats.verticalMoves,
+      services = state.stats.services,
+      fluids = state.stats.fluids,
+      seals = state.stats.seals,
+      blockTypes = state.stats.blockTypes,
+      oreTypes = state.stats.oreTypes,
+    },
     inventory = inventory, inventoryUsedSlots = inventoryUsedSlots,
     inventoryTotalItems = inventoryTotalItems,
   }
@@ -1730,6 +1740,8 @@ local function completeQuarry()
   paint(colors.lime)
   print("Layer quarry complete. All items were delivered to the service chests.")
   paint(colors.white)
+  state.phase = "complete"
+  broadcastMonitor("Layer quarry complete: " .. state.stats.blocks .. " blocks mined")
   notify("Layer quarry complete: " .. state.stats.blocks .. " blocks mined", "success")
   local statsHandle = fs.open("/quarryos/quarry-last-stats", "w")
   statsHandle.write(textutils.serialize(state.stats))

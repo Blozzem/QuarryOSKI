@@ -3,8 +3,11 @@
 Das Gateway verbindet zwei getrennte Netze: QuarryOS funkt innerhalb von
 Minecraft über Rednet; der Gateway-Computer sendet diese Daten per HTTP an die
 Web-API. Die Website spricht nur mit der API und niemals direkt mit Minecraft.
-Das Dashboard zeigt den aktuellen Zickzack-Fortschritt als Live-Karte und die
-16 Turtle-Slots. Slot 16 wird als feste Liquid-Guard-Reserve markiert.
+Das Dashboard zeigt den aktuellen Zickzack-Fortschritt als Live-Karte, die
+16 Turtle-Slots und die laufenden Abbau-Statistiken. Dazu gehören Block- und
+Erzarten, Bewegungen, Service-Besuche sowie Lava-Funde und Versiegelungen.
+Slot 16 wird als feste Liquid-Guard-Reserve markiert. Nach dem erfolgreichen
+Abschluss bleibt der zuletzt gesendete Statistikstand auf der Homepage sichtbar.
 
 ## 1. Webserver starten
 

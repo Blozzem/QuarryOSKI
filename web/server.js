@@ -68,7 +68,13 @@ function serveStatic(request, response, pathname) {
   if (!name) return false;
   const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
   const body = fs.readFileSync(path.join(PUBLIC_DIR, name));
-  response.writeHead(200, { "Content-Type": types[path.extname(name)], "Content-Length": body.length });
+  response.writeHead(200, {
+    "Content-Type": types[path.extname(name)],
+    "Content-Length": body.length,
+    "Cache-Control": "no-store, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  });
   response.end(body);
   return true;
 }
