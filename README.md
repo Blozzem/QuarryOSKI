@@ -76,9 +76,13 @@ continues. It takes full fuel stacks from the top chest, returning any unused
 items when its tank is full. Progress survives restarts. In bedrock
 mode it finishes the complete first layer where bedrock is encountered, which
 keeps the quarry floor level and safe. Use `stats` to view statistics for the
-last completed quarry. The Turtle screen and live monitor show percentage and
-an estimated remaining time. Custom fixed-depth plans are exact; bedrock plans
-use the usual Overworld bedrock level as a clearly marked approximation.
+last completed quarry. It lists mined ore blocks separately and shows the ten
+most common block types; use `stats all` for the complete block list. These are
+mined blocks, not item drops, so the numbers remain clear with Silk Touch,
+Fortune and modded drops. `history` includes a short ore summary for each new
+completed quarry. The Turtle screen and live monitor show percentage and an
+estimated remaining time. Custom fixed-depth plans are exact; bedrock plans use
+the usual Overworld bedrock level as a clearly marked approximation.
 
 GPS is optional for a **new** quarry. If no GPS network is found, QuarryOS uses
 the Turtle's current facing direction as its local forward direction and starts
@@ -136,19 +140,29 @@ Quarry plans include Small (16x16), Medium (32x32), Large (64x64) and a custom
 size. Before starting, QuarryOS estimates blocks and fuel. Use `history` for
 previous jobs and `selftest` to check the complete setup.
 
-If Minecraft or the server restarts, run `q` again on the same turtle.
-GPS-enabled quarries check their GPS position and continue at the saved layer
-and cell. A quarry that was started without GPS is kept safely but cannot be
-resumed if it stopped away from its service station, because its location
-cannot be verified. At the service station it asks for your manual
-confirmation before continuing. To abandon a saved job and create a new plan
-at the service corner, run `q new`; the old progress is archived instead of
-deleted.
+If Minecraft or the server restarts, run `q` again on the same turtle. When a
+job is saved, QuarryOS first shows a menu with **Resume**, **View detailed
+status**, **Archive and plan a new quarry**, and **Cancel**. Only choosing
+Resume reaches the normal chest, GPS and position safety checks. GPS-enabled
+quarries check their GPS position and continue at the saved layer and cell. A
+quarry that was started without GPS is kept safely but cannot be resumed if it
+stopped away from its service station, because its location cannot be verified.
+At the service station it asks for your manual confirmation before continuing.
+To skip the menu and create a new plan directly, run `q new`; the old progress
+is archived instead of deleted.
 
 ## In-game updates
 
 Run `update` from the QuarryOS shell to download the current version in place.
-No computer files need to be deleted; only QuarryOS files are replaced.
+It shows the installed and available version, checks every QuarryOS program
+file, then replaces only files whose contents changed. All changed files are
+downloaded to a temporary staging area before anything is replaced, so a failed
+download leaves the installed program unchanged. The standard Turtle and
+Monitor startup first repairs an interrupted update before QuarryOS starts; a
+custom `/startup` file is deliberately left untouched and can recover by
+running `update` again. Run `update check` to see the version and changed-file
+count without changing anything. No user data, quarry state, history or monitor
+settings are replaced.
 
 ## Guides
 
@@ -160,9 +174,10 @@ No computer files need to be deleted; only QuarryOS files are replaced.
 
 ```
 install.lua  One-line remote installer
-startup.lua  Boot entry point copied to the computer root
+startup.lua  Stable recovery boot entry copied to the computer root
 kernel.lua   Interactive QuarryOS shell
 ui.lua       Terminal rendering helpers
+VERSION      Release version shown by update check
 ```
 
 ## License

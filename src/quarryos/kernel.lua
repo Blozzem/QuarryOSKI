@@ -1,6 +1,16 @@
 local ui = dofile("/quarryos/ui.lua")
 
-local VERSION = "0.1.0"
+local function installedVersion()
+  local path = "/quarryos/.version"
+  if not fs.exists(path) then return "legacy" end
+  local file = fs.open(path, "r")
+  if not file then return "legacy" end
+  local version = file.readAll():gsub("^%s+", ""):gsub("%s+$", "")
+  file.close()
+  return version ~= "" and version or "legacy"
+end
+
+local VERSION = installedVersion()
 local running = true
 
 local builtins = {}
@@ -21,9 +31,9 @@ local function printHelp()
   print("  ls [directory]       List files")
   print("  edit <file>          Open the native editor")
   print("  run <program> [...]  Run a program")
-  print("  update               Download the latest QuarryOS version")
-  print("  quarry | q [new]     Resume quarry or plan a new one")
-  print("  stats                Show the last completed quarry statistics")
+  print("  update [check]       Check or download the latest QuarryOS version")
+  print("  quarry | q [new]     Open saved job menu or plan a new quarry")
+  print("  stats [all]          Show the last completed quarry statistics")
   print("  history              Show completed quarry jobs")
   print("  selftest             Check optional GPS, chests, fuel and modem")
   print("  reboot | shutdown    Power controls")
@@ -105,8 +115,9 @@ builtins.run = function(arguments)
   shell.run(table.unpack(arguments))
 end
 
-builtins.update = function()
-  shell.run("/quarryos/update.lua")
+builtins.update = function(arguments)
+  table.remove(arguments, 1)
+  shell.run("/quarryos/update.lua", table.unpack(arguments))
 end
 
 builtins.quarry = function(arguments)
@@ -115,8 +126,9 @@ builtins.quarry = function(arguments)
 end
 builtins.q = builtins.quarry
 
-builtins.stats = function()
-  shell.run("/quarryos/stats.lua")
+builtins.stats = function(arguments)
+  table.remove(arguments, 1)
+  shell.run("/quarryos/stats.lua", table.unpack(arguments))
 end
 
 builtins.history = function()

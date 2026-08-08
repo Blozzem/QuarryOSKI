@@ -55,6 +55,9 @@ if arguments[1] and arguments[1] ~= "new" then
 end
 
 local state, recoveredFromBackup = loadState()
+-- The one block that may be cleared for the initial direction/path check is
+-- part of a newly planned quarry too. Keep its yield until the new state exists.
+local setupMinedStats = { blocks = 0, blockTypes = {}, oreTypes = {} }
 local hasSavedState = fs.exists(stateFile) or fs.exists(stateBackupFile)
 if arguments[1] == "new" and hasSavedState then
   local archived = archiveState("cancelled")
@@ -87,7 +90,10 @@ if state and state.gpsEnabled and not state.origin then
 end
 
 if state and not state.stats then
-  state.stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 }
+  state.stats = {
+    blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0,
+    fluids = 0, seals = 0, blockTypes = {}, oreTypes = {},
+  }
 end
 if state then
   -- Plans created by the first layer release always travelled forwards. Add
@@ -103,7 +109,7 @@ if state then
     state.layerProgress = totalCells
     state.nextCell = totalCells - 1
   end
-  state.version = math.max(7, state.version or 1)
+  state.version = math.max(9, state.version or 1)
   state.jobId = state.jobId or (tostring(os.getComputerID()) .. "-" .. tostring(os.epoch("utc")))
   state.bedrockFound = state.bedrockFound or false
   state.layerComplete = state.layerComplete or false
@@ -123,6 +129,8 @@ if state then
   for _, key in ipairs(obsoleteFluidChecks) do state.fluidChecks[key] = nil end
   state.stats.fluids = state.stats.fluids or 0
   state.stats.seals = state.stats.seals or 0
+  state.stats.blockTypes = type(state.stats.blockTypes) == "table" and state.stats.blockTypes or {}
+  state.stats.oreTypes = type(state.stats.oreTypes) == "table" and state.stats.oreTypes or {}
   -- Estimate the normal Overworld bedrock level for a useful *approximate*
   -- progress display. The actual quarry still stops only when it finds
   -- bedrock, so modded worlds and other dimensions remain safe.
@@ -263,6 +271,31 @@ local function paint(colour) term.setTextColor(colour) end
 
 local function isWaterBlock(detail)
   return detail and detail.name == "minecraft:water"
+end
+
+local function normaliseOreType(id)
+  if type(id) ~= "string" then return nil end
+  local namespace, path = id:match("^([^:]+):(.+)$")
+  if not namespace then namespace, path = "minecraft", id end
+  if path == "ancient_debris" then return namespace .. ":ancient_debris" end
+  local material = path:match("^deepslate_(.+)_ore$") or path:match("^(.+)_ore$")
+  if not material then return nil end
+  return namespace .. ":" .. material
+end
+
+-- This records blocks, not item drops. That keeps the statistic correct with
+-- Silk Touch, Fortune and modded ore drops.
+local function recordMinedBlock(detail)
+  local id = detail and detail.name or "unknown"
+  local stats = state and state.stats or setupMinedStats
+  stats.blocks = (stats.blocks or 0) + 1
+  stats.blockTypes = stats.blockTypes or {}
+  stats.blockTypes[id] = (stats.blockTypes[id] or 0) + 1
+  local ore = normaliseOreType(id)
+  if ore then
+    stats.oreTypes = stats.oreTypes or {}
+    stats.oreTypes[ore] = (stats.oreTypes[ore] or 0) + 1
+  end
 end
 
 -- Rednet only broadcasts through opened modems. The turtle modem is normally
@@ -499,6 +532,7 @@ local function clearFirstQuarryCell()
   end
   local dug, digReason = turtle.dig()
   if dug then
+    recordMinedBlock(detail)
     print("Mined the first block for the quarry.")
     return true
   end
@@ -543,6 +577,7 @@ local function setupMenu()
         end
         local dug, digReason = turtle.dig()
         if dug then
+          recordMinedBlock(detail)
           moved, moveReason = turtle.forward()
           if moved then print("Mined the first block for the GPS direction check.") end
         else
@@ -610,13 +645,17 @@ local function setupMenu()
   write("Start this quarry? [Y/n] ")
   if read():lower() == "n" then return nil end
   return {
-    layout = stateLayout, version = 7,
+    layout = stateLayout, version = 9,
     width = width, length = length, maximum = maximum,
     x = 0, z = 0, heading = 0, depth = 0,
     layer = 1, nextCell = 0, layerProgress = 0, routeDirection = 1, positionStep = -1,
     layerComplete = false, bedrockFound = false, phase = "surface", fluidChecks = {},
     emergencyMode = true, gpsEnabled = gpsEnabled,
-    stats = { blocks = 0, surfaceMoves = 0, verticalMoves = 0, services = 0, fluids = 0, seals = 0 },
+    stats = {
+      blocks = setupMinedStats.blocks, surfaceMoves = 0, verticalMoves = 0, services = 0,
+      fluids = 0, seals = 0, blockTypes = setupMinedStats.blockTypes,
+      oreTypes = setupMinedStats.oreTypes,
+    },
     origin = gpsEnabled and {
       x = originX, y = originY, z = originZ,
       forwardX = forwardX - originX, forwardZ = forwardZ - originZ,
@@ -704,6 +743,103 @@ local function markStartupEmergency(reason)
   state.phase = "emergency"
   saveState()
   notify("EMERGENCY: " .. reason, "error")
+end
+
+local function renderSavedJobHeader(title)
+  term.setBackgroundColor(colors.black)
+  term.clear()
+  term.setCursorPos(1, 1)
+  term.setBackgroundColor(colors.blue)
+  paint(colors.white)
+  print(" QuarryOS | " .. title)
+  term.setBackgroundColor(colors.black)
+end
+
+local function savedJobLines()
+  local total = math.max(1, state.width * state.length)
+  local percentage, eta, approximate = quarryProgress()
+  local target = state.maximum == 0 and "bedrock" or ("depth " .. state.maximum)
+  local safety = state.gpsEnabled
+    and "GPS check before resume"
+    or "No GPS - confirm service station"
+  return {
+    "Area: " .. state.width .. "x" .. state.length .. " to " .. target,
+    "Phase: " .. tostring(state.phase or "unknown"),
+    "Layer: " .. tostring(state.layer or 1) .. "  Cell: "
+      .. math.min(total, (state.layerProgress or 0) + 1) .. "/" .. total,
+    "Progress: " .. (approximate and "~" or "") .. percentage .. "%  ETA: "
+      .. (approximate and "~" or "") .. formatDuration(eta),
+    "Blocks: " .. tostring(state.stats.blocks or 0) .. "  Fuel: "
+      .. tostring(fuelLevel()) .. "/" .. tostring(fuelRequiredForResume()),
+    "Safety: " .. safety,
+  }
+end
+
+local function showSavedJobDetails()
+  renderSavedJobHeader("SAVED QUARRY STATUS")
+  for _, line in ipairs(savedJobLines()) do print(line) end
+  print("Position: " .. tostring(state.x) .. "," .. tostring(state.z)
+    .. "  depth " .. tostring(state.depth))
+  print("Service visits: " .. tostring(state.stats.services or 0))
+  print("Lava fields/seals: " .. tostring(state.stats.fluids or 0)
+    .. "/" .. tostring(state.stats.seals or 0))
+  if state.emergency and state.emergency.message then
+    paint(colors.red)
+    print("Last emergency: " .. tostring(state.emergency.message))
+    paint(colors.white)
+  end
+  print("")
+  paint(colors.lightGray)
+  write("Press Enter to return to the menu... ")
+  read()
+  paint(colors.white)
+end
+
+local function savedJobMenu()
+  while true do
+    renderSavedJobHeader("SAVED QUARRY")
+    for _, line in ipairs(savedJobLines()) do print(line) end
+    if state.emergency and state.emergency.message then
+      paint(colors.red)
+      print("Emergency saved: " .. tostring(state.emergency.message))
+      paint(colors.white)
+    end
+    print("")
+    print("1) Resume quarry")
+    print("2) View detailed status")
+    print("3) Archive and plan a new quarry")
+    print("4) Cancel")
+    write("Choice [1-4]: ")
+    local choice = read()
+    if choice == "1" then return "resume" end
+    if choice == "2" then
+      showSavedJobDetails()
+    elseif choice == "3" then
+      paint(colors.orange)
+      write("Archive this quarry and plan a new one? [y/N] ")
+      local answer = read():lower()
+      paint(colors.white)
+      if answer == "y" or answer == "yes" or answer == "j" or answer == "ja" then
+        return "new"
+      end
+    elseif choice == "4" then
+      return "cancel"
+    else
+      paint(colors.red)
+      print("Please choose 1, 2, 3 or 4.")
+      paint(colors.white)
+    end
+  end
+end
+
+if state then
+  local savedAction = savedJobMenu()
+  if savedAction == "cancel" then return end
+  if savedAction == "new" then
+    local archived = archiveState("cancelled")
+    state = nil
+    print("Previous quarry progress archived to " .. archived)
+  end
 end
 
 local resumePausedQuarry = state and state.phase == "paused"
@@ -812,7 +948,7 @@ local function moveForward(allowDig)
       else
         local dug, digReason = turtle.dig()
         if dug then
-          state.stats.blocks = state.stats.blocks + 1
+          recordMinedBlock(detail)
           moved, reason = turtle.forward()
         else
           reason = "Cannot mine " .. (detail.name or "front block") .. ": " .. (digReason or "unknown reason")
@@ -847,7 +983,7 @@ local function moveDown(allowDig)
       else
         local dug, digReason = turtle.digDown()
         if dug then
-          state.stats.blocks = state.stats.blocks + 1
+          recordMinedBlock(detail)
           moved, reason = turtle.down()
         else
           reason = "Cannot mine " .. (detail.name or "block below") .. ": " .. (digReason or "unknown reason")
@@ -884,7 +1020,7 @@ local function moveUp(allowDig)
       else
         local dug, digReason = turtle.digUp()
         if dug then
-          state.stats.blocks = state.stats.blocks + 1
+          recordMinedBlock(detail)
           moved, reason = turtle.up()
         else
           reason = "Cannot mine " .. (detail.name or "block above") .. ": " .. (digReason or "unknown reason")
@@ -1461,7 +1597,7 @@ local function mineCurrentCell()
   end
   local dug, reason = turtle.digDown()
   if dug then
-    state.stats.blocks = state.stats.blocks + 1
+    recordMinedBlock(detail)
     local hasAfterDig, afterDigDetail = turtle.inspectDown()
     local discoveredFluid = fluidKind(afterDigDetail)
     if discoveredFluid then
@@ -1602,6 +1738,7 @@ local function completeQuarry()
   history.writeLine(textutils.serialize({
     width = state.width, length = state.length, maximum = state.maximum,
     blocks = state.stats.blocks, fluids = state.stats.fluids, seals = state.stats.seals,
+    oreTypes = state.stats.oreTypes,
     started = state.started, finished = os.epoch("utc"), layout = "layers",
   }))
   history.close()
